@@ -53,9 +53,20 @@ const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__f
 };
 
 // アプリの初期化
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
+let app, auth, db;
+let initError = null;
+try {
+  if (!firebaseConfig.apiKey || firebaseConfig.apiKey === "ここにあなたのAPIキー") {
+    console.warn("APIキーが設定されていません");
+  }
+  app = initializeApp(firebaseConfig);
+  auth = getAuth(app);
+  db = getFirestore(app);
+} catch (e) {
+  console.error("Firebase Init Error:", e);
+  initError = e.message;
+}
+
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'med-study-app';
 
 // --- Helper: CSV Parser ---
@@ -178,27 +189,35 @@ export default function App() {
   const [adminSelectedIndices, setAdminSelectedIndices] = useState([]);
   const [deleteRange, setDeleteRange] = useState({ start: '', end: '' });
 
-  // ★★★ 修正ポイント：Hooksは必ず条件分岐の前に置く！ ★★★
+  // Quiz Hooks & Variables (これらを関数内で定義し直しました)
   const currentQ = questions[currentQuestionIndex];
+  
+  // ★ ここで定義することで ReferenceError を回避
+  const isLastQuestion = questions.length > 0 && currentQuestionIndex === questions.length - 1;
+  const isReviewMode = mode === 'review';
+  const canCheck = currentQ 
+    ? (currentQ.type === 'input' ? textInput.length > 0 : selectedOptions.length > 0)
+    : false;
 
-  // 選択肢のシャッフル（問題が変わるたびに計算）
+  // 選択肢シャッフル
   const currentOptions = useMemo(() => {
-    // 安全策: currentQやoptionsがない、または配列でない場合は空配列を返す
     if (!currentQ || !Array.isArray(currentQ.options) || currentQ.type === 'input') {
       return [];
     }
     return shuffleArray(currentQ.options);
   }, [currentQ]);
-  // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 
   // --- Auth & Init ---
   useEffect(() => {
+    if (initError) return;
+
     const initAuth = async () => {
       if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
         await signInWithCustomToken(auth, __initial_auth_token);
       }
     };
     initAuth();
+
     const unsubscribe = onAuthStateChanged(auth, (u) => {
       setUser(u);
       setLoading(false);
@@ -214,6 +233,7 @@ export default function App() {
 
   // --- Data Loading ---
   const loadUserData = async (uid) => {
+    if (initError) return;
     try {
       const qRef = collection(db, 'artifacts', appId, 'public', 'data', 'questions');
       const qSnap = await getDocs(qRef);
@@ -565,6 +585,24 @@ export default function App() {
   };
 
   // --- UI Rendering ---
+  
+  if (initError) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-red-50 p-6">
+        <div className="bg-white p-8 rounded-2xl shadow-xl max-w-md text-center">
+          <div className="bg-red-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
+            <AlertCircle className="text-red-500 w-8 h-8" />
+          </div>
+          <h2 className="text-xl font-bold text-gray-800 mb-2">設定エラー</h2>
+          <p className="text-gray-600 mb-4 break-all text-sm">{initError}</p>
+          <p className="text-xs text-gray-400 bg-gray-100 p-2 rounded text-left">
+            App.jsxの36行目付近にある「firebaseConfig」の設定を確認してください。
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   if (loading) return <div className="min-h-screen flex items-center justify-center bg-gray-50 text-blue-600 font-bold text-xl animate-pulse">Loading...</div>;
 
   if (view === 'auth') {
