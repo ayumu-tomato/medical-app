@@ -208,6 +208,7 @@ export default function App() {
       const qSnap = await getDocs(qRef);
       let loadedQuestions = [];
       if (qSnap.empty) {
+        // Initial Seed
         const seedPromises = INITIAL_QUESTIONS.map(q => 
           setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'questions', q.id), q)
         );
@@ -216,6 +217,7 @@ export default function App() {
       } else {
         loadedQuestions = qSnap.docs.map(doc => ({...doc.data(), id: doc.id}));
       }
+      // Sort by createdAt if available, otherwise loose sort
       loadedQuestions.sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''));
       setQuestions(loadedQuestions);
 
@@ -288,6 +290,7 @@ export default function App() {
         }
 
         setImportStatus(`${newQuestions.length}件登録中...`);
+        // Batch write in chunks of 500
         const chunkSize = 500;
         for (let i = 0; i < newQuestions.length; i += chunkSize) {
           const chunk = newQuestions.slice(i, i + chunkSize);
@@ -770,6 +773,17 @@ export default function App() {
     }
     return shuffleArray(currentQ.options);
   }, [currentQ]);
+
+  // ★★★ 安全策：問題がない場合にエラーにしない ★★★
+  if (!currentQ && view === 'quiz') {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 flex-col gap-4">
+        <div className="animate-spin h-10 w-10 border-4 border-blue-600 border-t-transparent rounded-full"></div>
+        <p className="text-gray-500 font-bold">データを読み込んでいます...</p>
+        <p className="text-xs text-gray-400">※ずっと動かない場合はAPIキーを確認してください</p>
+      </div>
+    );
+  }
 
   let isCorrectDisplay = false;
   if (showExplanation) {
