@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { initializeApp } from 'firebase/app';
 import { 
   getAuth, 
@@ -38,8 +38,7 @@ import {
   FileText,
   Trash2,
   List,
-  AlertTriangle,
-  MoreVertical
+  AlertTriangle
 } from 'lucide-react';
 
 // --- Firebase Configuration (設定エリア) ---
@@ -82,6 +81,16 @@ const parseCSVLine = (text) => {
   }
   result.push(current);
   return result;
+};
+
+// --- Helper: Shuffle Array (Fisher-Yates) ---
+const shuffleArray = (array) => {
+  const newArray = [...array];
+  for (let i = newArray.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [newArray[i], newArray[j]] = [newArray[j], newArray[i]];
+  }
+  return newArray;
 };
 
 // --- Sample Data ---
@@ -159,7 +168,7 @@ export default function App() {
   const [importStatus, setImportStatus] = useState('');
   
   // Quiz State
-  const [isUnsure, setIsUnsure] = useState(false); // Current question marked as unsure
+  const [isUnsure, setIsUnsure] = useState(false);
 
   // Admin State
   const [newQ, setNewQ] = useState({
@@ -196,7 +205,6 @@ export default function App() {
       const qSnap = await getDocs(qRef);
       let loadedQuestions = [];
       if (qSnap.empty) {
-        // Initial Seed
         const seedPromises = INITIAL_QUESTIONS.map(q => 
           setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'questions', q.id), q)
         );
@@ -205,7 +213,6 @@ export default function App() {
       } else {
         loadedQuestions = qSnap.docs.map(doc => ({...doc.data(), id: doc.id}));
       }
-      // Sort by createdAt if available, otherwise loose sort
       loadedQuestions.sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''));
       setQuestions(loadedQuestions);
 
@@ -278,7 +285,6 @@ export default function App() {
         }
 
         setImportStatus(`${newQuestions.length}件登録中...`);
-        // Batch write in chunks of 500
         const chunkSize = 500;
         for (let i = 0; i < newQuestions.length; i += chunkSize) {
           const chunk = newQuestions.slice(i, i + chunkSize);
@@ -327,14 +333,12 @@ export default function App() {
     let targetQuestions = [...questions];
     
     if (selectedMode === 'review') {
-      // 復習モード: 不正解 OR 不安(△) の問題を抽出
       targetQuestions = targetQuestions.filter(q => {
         const hist = userHistory[q.id];
-        if (!hist) return false; // 未回答は含めない（あるいは含めるならロジック変更）
+        if (!hist) return false; 
         return hist.isCorrect === false || hist.isUnsure === true;
       });
 
-      // 苦手順（間違えた回数順）
       targetQuestions.sort((a, b) => {
         const countA = userHistory[a.id]?.wrongCount || 0;
         const countB = userHistory[b.id]?.wrongCount || 0;
@@ -397,15 +401,13 @@ export default function App() {
       const currentWrongCount = prevHistory.wrongCount || 0;
       const newWrongCount = isCorrect ? currentWrongCount : currentWrongCount + 1;
 
-      // Unsure flag is handled by a separate button, but we init it as false here if not set
-      // We will save basic result first
       const resultData = {
         ...prevHistory,
         isCorrect,
         timestamp: new Date().toISOString(),
         lastAnswer: currentQ.type === 'input' ? textInput : selectedOptions,
         wrongCount: newWrongCount,
-        isUnsure: false // Reset unsure on new answer, unless user marks it again
+        isUnsure: false 
       };
       
       setUserHistory(prev => ({ ...prev, [currentQ.id]: resultData }));
@@ -420,7 +422,6 @@ export default function App() {
     const newUnsureStatus = !isUnsure;
     setIsUnsure(newUnsureStatus);
 
-    // Update local state and Firestore
     const updatedHistory = {
       ...userHistory[currentQ.id],
       isUnsure: newUnsureStatus
@@ -441,7 +442,7 @@ export default function App() {
     }
   };
 
-  // --- Admin Logic (Batch Delete) ---
+  // --- Admin Logic ---
   const handleDeleteQuestion = async (id) => {
     if (!confirm("本当にこの問題を削除しますか？")) return;
     try {
@@ -489,8 +490,6 @@ export default function App() {
     
     if (!confirm(`No.${s} から No.${e} までの問題を削除しますか？`)) return;
 
-    // questions array is 0-indexed, so No.1 is index 0
-    // The displayed list corresponds to the current 'questions' state order
     const targets = questions.slice(s - 1, e);
     if (targets.length === 0) {
       alert("指定された範囲に問題がありません");
@@ -509,7 +508,6 @@ export default function App() {
         await batch.commit();
       }
       
-      // Update local state
       const deletedIds = new Set(targets.map(q => q.id));
       setQuestions(prev => prev.filter(q => !deletedIds.has(q.id)));
       
@@ -525,7 +523,6 @@ export default function App() {
     if (!newQ.questionText || !newQ.category || !newQ.explanation) {
       alert('必須項目を入力してください'); return;
     }
-    // ... (Same logic as before, abbreviated for brevity)
     let finalCorrectAnswer;
     const cleanOptions = newQ.options.filter(o => o.trim() !== '');
     if (newQ.type === 'input') {
@@ -762,6 +759,12 @@ export default function App() {
   const isReviewMode = mode === 'review';
   const canCheck = currentQ.type === 'input' ? textInput.length > 0 : selectedOptions.length > 0;
   
+  // ★ 選択肢のシャッフル（問題が変わるたびに計算）
+  const currentOptions = useMemo(() => {
+    if (!currentQ || currentQ.type === 'input') return [];
+    return shuffleArray(currentQ.options);
+  }, [currentQ]); // 依存配列にcurrentQを指定することで、問題が変わった時だけシャッフルされる
+
   let isCorrectDisplay = false;
   if (showExplanation) {
     if (currentQ.type === 'input') {
@@ -814,7 +817,8 @@ export default function App() {
                 />
               </div>
             ) : (
-              currentQ.options.map((option, idx) => {
+              /* ★ ここを変更：currentOptions（シャッフル済）を使用 */
+              currentOptions.map((option, idx) => {
                 const isSelected = selectedOptions.includes(option);
                 let styleClass = "border-2 border-gray-100 hover:bg-gray-50 hover:border-gray-200";
                 
