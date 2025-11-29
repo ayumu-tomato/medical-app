@@ -85,9 +85,7 @@ const parseCSVLine = (text) => {
 
 // --- Helper: Shuffle Array (Fisher-Yates) ---
 const shuffleArray = (array) => {
-  // 安全策：配列でない場合は空配列を返す
   if (!Array.isArray(array)) return [];
-  
   const newArray = [...array];
   for (let i = newArray.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -180,6 +178,19 @@ export default function App() {
   const [adminSelectedIndices, setAdminSelectedIndices] = useState([]);
   const [deleteRange, setDeleteRange] = useState({ start: '', end: '' });
 
+  // ★★★ 修正ポイント：Hooksは必ず条件分岐の前に置く！ ★★★
+  const currentQ = questions[currentQuestionIndex];
+
+  // 選択肢のシャッフル（問題が変わるたびに計算）
+  const currentOptions = useMemo(() => {
+    // 安全策: currentQやoptionsがない、または配列でない場合は空配列を返す
+    if (!currentQ || !Array.isArray(currentQ.options) || currentQ.type === 'input') {
+      return [];
+    }
+    return shuffleArray(currentQ.options);
+  }, [currentQ]);
+  // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+
   // --- Auth & Init ---
   useEffect(() => {
     const initAuth = async () => {
@@ -208,7 +219,6 @@ export default function App() {
       const qSnap = await getDocs(qRef);
       let loadedQuestions = [];
       if (qSnap.empty) {
-        // Initial Seed
         const seedPromises = INITIAL_QUESTIONS.map(q => 
           setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'questions', q.id), q)
         );
@@ -217,7 +227,6 @@ export default function App() {
       } else {
         loadedQuestions = qSnap.docs.map(doc => ({...doc.data(), id: doc.id}));
       }
-      // Sort by createdAt if available, otherwise loose sort
       loadedQuestions.sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''));
       setQuestions(loadedQuestions);
 
@@ -290,7 +299,6 @@ export default function App() {
         }
 
         setImportStatus(`${newQuestions.length}件登録中...`);
-        // Batch write in chunks of 500
         const chunkSize = 500;
         for (let i = 0; i < newQuestions.length; i += chunkSize) {
           const chunk = newQuestions.slice(i, i + chunkSize);
@@ -374,7 +382,6 @@ export default function App() {
 
   const handleOptionSelect = (option) => {
     if (showExplanation) return;
-    const currentQ = questions[currentQuestionIndex];
 
     if (currentQ.type === 'single') {
       setSelectedOptions([option]);
@@ -388,7 +395,6 @@ export default function App() {
   };
 
   const checkAnswer = async () => {
-    const currentQ = questions[currentQuestionIndex];
     let isCorrect = false;
 
     if (currentQ.type === 'input') {
@@ -424,7 +430,6 @@ export default function App() {
 
   const toggleUnsureMark = async () => {
     if (!user) return;
-    const currentQ = questions[currentQuestionIndex];
     const newUnsureStatus = !isUnsure;
     setIsUnsure(newUnsureStatus);
 
@@ -759,22 +764,7 @@ export default function App() {
     );
   }
 
-  // 4. Quiz Screen
-  const currentQ = questions[currentQuestionIndex];
-  const isLastQuestion = currentQuestionIndex === questions.length - 1;
-  const isReviewMode = mode === 'review';
-  const canCheck = currentQ.type === 'input' ? textInput.length > 0 : selectedOptions.length > 0;
-  
-  // ★ 選択肢のシャッフル（問題が変わるたびに計算）
-  const currentOptions = useMemo(() => {
-    // 安全策: currentQやoptionsがない、または配列でない場合は空配列を返す
-    if (!currentQ || !Array.isArray(currentQ.options) || currentQ.type === 'input') {
-      return [];
-    }
-    return shuffleArray(currentQ.options);
-  }, [currentQ]);
-
-  // ★★★ 安全策：問題がない場合にエラーにしない ★★★
+  // 4. Quiz Screen (Safe Guard)
   if (!currentQ && view === 'quiz') {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50 flex-col gap-4">
@@ -785,8 +775,9 @@ export default function App() {
     );
   }
 
+  // Quiz Rendering Logic
   let isCorrectDisplay = false;
-  if (showExplanation) {
+  if (showExplanation && currentQ) {
     if (currentQ.type === 'input') {
       const normalize = (str) => str.replace(/\s+/g, '').toLowerCase();
       isCorrectDisplay = normalize(textInput) === normalize(currentQ.correctAnswer);
@@ -815,61 +806,62 @@ export default function App() {
       </div>
 
       <div className="flex-1 overflow-y-auto p-4 pb-40 max-w-2xl mx-auto w-full">
-        <div className="bg-white rounded-3xl shadow-sm p-6 mb-6">
-          <div className="flex items-center gap-2 mb-4">
-            <span className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-1 rounded-md">{currentQ.category}</span>
-            <span className="bg-gray-100 text-gray-600 text-xs font-bold px-2 py-1 rounded-md">
-              {currentQ.type === 'multi' ? '複数選択' : currentQ.type === 'input' ? '記述' : '単一選択'}
-            </span>
+        {currentQ && (
+          <div className="bg-white rounded-3xl shadow-sm p-6 mb-6">
+            <div className="flex items-center gap-2 mb-4">
+              <span className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-1 rounded-md">{currentQ.category}</span>
+              <span className="bg-gray-100 text-gray-600 text-xs font-bold px-2 py-1 rounded-md">
+                {currentQ.type === 'multi' ? '複数選択' : currentQ.type === 'input' ? '記述' : '単一選択'}
+              </span>
+            </div>
+            <h2 className="text-xl font-bold text-gray-900 leading-relaxed mb-8">{currentQ.questionText}</h2>
+
+            <div className="space-y-3">
+              {currentQ.type === 'input' ? (
+                <div className="my-8">
+                  <Input 
+                    value={textInput}
+                    onChange={(e) => setTextInput(e.target.value)}
+                    placeholder="解答を入力してください"
+                    onKeyDown={(e) => e.key === 'Enter' && !showExplanation && checkAnswer()}
+                    disabled={showExplanation}
+                    autoFocus
+                  />
+                </div>
+              ) : (
+                currentOptions.map((option, idx) => {
+                  const isSelected = selectedOptions.includes(option);
+                  let styleClass = "border-2 border-gray-100 hover:bg-gray-50 hover:border-gray-200";
+                  
+                  if (showExplanation) {
+                    const isAnswer = Array.isArray(currentQ.correctAnswer) ? currentQ.correctAnswer.includes(option) : currentQ.correctAnswer === option;
+                    if (isAnswer) styleClass = "bg-emerald-50 border-emerald-500 text-emerald-700 font-bold";
+                    else if (isSelected && !isAnswer) styleClass = "bg-red-50 border-red-200 text-red-400";
+                    else styleClass = "opacity-40 border-gray-100 grayscale";
+                  } else {
+                    if (isSelected) styleClass = "bg-blue-50 border-blue-500 text-blue-700 font-bold shadow-sm ring-1 ring-blue-500";
+                  }
+
+                  return (
+                    <button key={idx} onClick={() => handleOptionSelect(option)} disabled={showExplanation} 
+                      className={`w-full text-left p-4 rounded-xl transition-all duration-200 flex items-center justify-between text-base leading-snug ${styleClass} active:scale-[0.99]`}
+                    >
+                      <span>{option}</span>
+                      {isSelected && !showExplanation && <CheckCircle size={20} className="text-blue-600 fill-blue-50"/>}
+                      {showExplanation && (
+                        (Array.isArray(currentQ.correctAnswer) ? currentQ.correctAnswer.includes(option) : currentQ.correctAnswer === option) 
+                        ? <CheckCircle size={20} className="text-emerald-600 fill-emerald-100"/> 
+                        : (isSelected && <XCircle size={20} className="text-red-400 fill-red-50"/>)
+                      )}
+                    </button>
+                  );
+                })
+              )}
+            </div>
           </div>
-          <h2 className="text-xl font-bold text-gray-900 leading-relaxed mb-8">{currentQ.questionText}</h2>
+        )}
 
-          <div className="space-y-3">
-            {currentQ.type === 'input' ? (
-              <div className="my-8">
-                <Input 
-                  value={textInput}
-                  onChange={(e) => setTextInput(e.target.value)}
-                  placeholder="解答を入力してください"
-                  onKeyDown={(e) => e.key === 'Enter' && !showExplanation && checkAnswer()}
-                  disabled={showExplanation}
-                  autoFocus
-                />
-              </div>
-            ) : (
-              /* ★ ここを変更：currentOptions（シャッフル済）を使用 */
-              currentOptions.map((option, idx) => {
-                const isSelected = selectedOptions.includes(option);
-                let styleClass = "border-2 border-gray-100 hover:bg-gray-50 hover:border-gray-200";
-                
-                if (showExplanation) {
-                  const isAnswer = Array.isArray(currentQ.correctAnswer) ? currentQ.correctAnswer.includes(option) : currentQ.correctAnswer === option;
-                  if (isAnswer) styleClass = "bg-emerald-50 border-emerald-500 text-emerald-700 font-bold";
-                  else if (isSelected && !isAnswer) styleClass = "bg-red-50 border-red-200 text-red-400";
-                  else styleClass = "opacity-40 border-gray-100 grayscale";
-                } else {
-                  if (isSelected) styleClass = "bg-blue-50 border-blue-500 text-blue-700 font-bold shadow-sm ring-1 ring-blue-500";
-                }
-
-                return (
-                  <button key={idx} onClick={() => handleOptionSelect(option)} disabled={showExplanation} 
-                    className={`w-full text-left p-4 rounded-xl transition-all duration-200 flex items-center justify-between text-base leading-snug ${styleClass} active:scale-[0.99]`}
-                  >
-                    <span>{option}</span>
-                    {isSelected && !showExplanation && <CheckCircle size={20} className="text-blue-600 fill-blue-50"/>}
-                    {showExplanation && (
-                      (Array.isArray(currentQ.correctAnswer) ? currentQ.correctAnswer.includes(option) : currentQ.correctAnswer === option) 
-                      ? <CheckCircle size={20} className="text-emerald-600 fill-emerald-100"/> 
-                      : (isSelected && <XCircle size={20} className="text-red-400 fill-red-50"/>)
-                    )}
-                  </button>
-                );
-              })
-            )}
-          </div>
-        </div>
-
-        {showExplanation && (
+        {showExplanation && currentQ && (
           <div className={`rounded-3xl p-6 shadow-sm border-l-8 animate-in fade-in slide-in-from-bottom-4 duration-500 ${isCorrectDisplay ? 'bg-emerald-50 border-emerald-500' : 'bg-red-50 border-red-500'}`}>
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-3">
@@ -883,7 +875,6 @@ export default function App() {
                 </span>
               </div>
               
-              {/* 正解だけど不安ボタン */}
               {isCorrectDisplay && (
                 <button 
                   onClick={toggleUnsureMark}
