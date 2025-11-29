@@ -85,6 +85,9 @@ const parseCSVLine = (text) => {
 
 // --- Helper: Shuffle Array (Fisher-Yates) ---
 const shuffleArray = (array) => {
+  // 安全策：配列でない場合は空配列を返す
+  if (!Array.isArray(array)) return [];
+  
   const newArray = [...array];
   for (let i = newArray.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -761,9 +764,12 @@ export default function App() {
   
   // ★ 選択肢のシャッフル（問題が変わるたびに計算）
   const currentOptions = useMemo(() => {
-    if (!currentQ || currentQ.type === 'input') return [];
+    // 安全策: currentQやoptionsがない、または配列でない場合は空配列を返す
+    if (!currentQ || !Array.isArray(currentQ.options) || currentQ.type === 'input') {
+      return [];
+    }
     return shuffleArray(currentQ.options);
-  }, [currentQ]); // 依存配列にcurrentQを指定することで、問題が変わった時だけシャッフルされる
+  }, [currentQ]);
 
   let isCorrectDisplay = false;
   if (showExplanation) {
