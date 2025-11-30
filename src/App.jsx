@@ -38,7 +38,8 @@ import {
   FileText,
   Trash2,
   List,
-  AlertTriangle
+  AlertTriangle,
+  Hash
 } from 'lucide-react';
 
 // --- Configuration ---
@@ -72,14 +73,12 @@ try {
 
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'med-study-app';
 
-// --- Helper: String Normalizer (全角→半角、小文字化、スペース削除) ---
+// --- Helper: String Normalizer ---
 const normalizeString = (str) => {
   if (!str) return '';
-  // 全角英数字を半角に変換
   let normalized = str.replace(/[Ａ-Ｚａ-ｚ０-９]/g, (s) => {
     return String.fromCharCode(s.charCodeAt(0) - 0xFEE0);
   });
-  // スペース削除、小文字化
   return normalized.replace(/\s+/g, '').toLowerCase();
 };
 
@@ -108,7 +107,7 @@ const parseCSVLine = (text) => {
   return result;
 };
 
-// --- Helper: Shuffle Array (Fisher-Yates) ---
+// --- Helper: Shuffle Array ---
 const shuffleArray = (array) => {
   if (!Array.isArray(array)) return [];
   const newArray = [...array];
@@ -119,14 +118,10 @@ const shuffleArray = (array) => {
   return newArray;
 };
 
-// --- Helper: Answer Matcher (柔軟な正解判定) ---
+// --- Helper: Answer Matcher ---
 const isAnswerMatch = (selectedOption, correctAnswer) => {
   if (!selectedOption || !correctAnswer) return false;
-  
-  // 1. 完全一致
   if (selectedOption === correctAnswer) return true;
-  
-  // 2. 先頭記号の一致 (例: selected="A. 心不全", correct="A")
   const separators = ['.', ')', ' ', '、']; 
   for (const sep of separators) {
     if (selectedOption.startsWith(correctAnswer + sep)) {
@@ -140,6 +135,7 @@ const isAnswerMatch = (selectedOption, correctAnswer) => {
 const INITIAL_QUESTIONS = [
   {
     id: 'q1',
+    displayId: '1_1', // サンプル用ID
     type: 'single',
     category: '循環器',
     questionText: '僧帽弁閉鎖不全症(MR)の聴診所見として最も適切なものはどれか。',
@@ -219,6 +215,8 @@ export default function App() {
   });
   const [adminSelectedIndices, setAdminSelectedIndices] = useState([]);
   const [deleteRange, setDeleteRange] = useState({ start: '', end: '' });
+  // ★ 新機能: アップロードバッチ番号
+  const [uploadBatchNum, setUploadBatchNum] = useState('1');
 
   // Quiz Hooks
   const currentQ = questions[currentQuestionIndex];
@@ -276,7 +274,17 @@ export default function App() {
       } else {
         loadedQuestions = qSnap.docs.map(doc => ({...doc.data(), id: doc.id}));
       }
-      loadedQuestions.sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''));
+      // ソート: displayIdがあればそれ順、なければ作成順
+      loadedQuestions.sort((a, b) => {
+        if (a.displayId && b.displayId) {
+           // n_m 形式のソート (例: 2_1 と 2_10 を正しく並べる)
+           const [aBatch, aNum] = a.displayId.split('_').map(Number);
+           const [bBatch, bNum] = b.displayId.split('_').map(Number);
+           if (aBatch !== bBatch) return aBatch - bBatch;
+           return aNum - bNum;
+        }
+        return (a.createdAt || '').localeCompare(b.createdAt || '');
+      });
       setQuestions(loadedQuestions);
 
       const historyRef = collection(db, 'artifacts', appId, 'users', uid, 'history');
@@ -308,6 +316,10 @@ export default function App() {
   const handleFileUpload = async (event) => {
     const file = event.target.files[0];
     if (!file) return;
+    if (!uploadBatchNum || isNaN(parseInt(uploadBatchNum))) {
+      alert("アップロード回数（バッチ番号）を入力してください");
+      return;
+    }
 
     const reader = new FileReader();
     reader.onload = async (e) => {
@@ -331,6 +343,9 @@ export default function App() {
           if (type === 'multi') {
             correctAnswer = correctAnswerRaw.split('|').map(s => s.trim());
           }
+          
+          // ★ displayIdの生成: バッチ番号_連番
+          const displayId = `${uploadBatchNum}_${i - startIdx + 1}`;
 
           newQuestions.push({
             type: type.trim(),
@@ -339,7 +354,8 @@ export default function App() {
             options: type === 'input' ? [] : options,
             correctAnswer,
             explanation: explanation.trim(),
-            createdAt: new Date().toISOString()
+            createdAt: new Date().toISOString(),
+            displayId: displayId // ★ ID保存
           });
         }
 
@@ -360,7 +376,7 @@ export default function App() {
           await batch.commit();
         }
 
-        setImportStatus(`完了！ ${newQuestions.length}件追加しました。`);
+        setImportStatus(`完了！ ${newQuestions.length}件追加しました。(ID: ${uploadBatchNum}_1 〜)`);
         loadUserData(user.uid);
         setTimeout(() => setImportStatus(''), 3000);
 
@@ -454,18 +470,13 @@ export default function App() {
     let isCorrect = false;
 
     if (currentQ.type === 'input') {
-      // ★★★ 記述式の別解対応（強化版） ★★★
       const normalizedInput = normalizeString(textInput);
-      
-      // 正解がパイプ区切りの場合、いずれかに一致すれば正解
       const correctAnswers = currentQ.correctAnswer.split('|');
       isCorrect = correctAnswers.some(ans => normalizedInput === normalizeString(ans));
-      
     } else if (currentQ.type === 'single') {
       isCorrect = isAnswerMatch(selectedOptions[0], currentQ.correctAnswer);
     } else if (currentQ.type === 'multi') {
       const correctArr = Array.isArray(currentQ.correctAnswer) ? currentQ.correctAnswer : [currentQ.correctAnswer];
-      
       if (selectedOptions.length === correctArr.length) {
         isCorrect = selectedOptions.every(opt => 
           correctArr.some(ans => isAnswerMatch(opt, ans))
@@ -558,6 +569,8 @@ export default function App() {
   };
 
   const handleDeleteRange = async () => {
+    // ★ 管理者画面での削除も、IDではなく配列index基準のまま簡易実装
+    // displayIdでの削除は複雑になるため、今回は「リストで見えているNo」で削除する仕様を維持
     const s = parseInt(deleteRange.start);
     const e = parseInt(deleteRange.end);
     
@@ -566,7 +579,7 @@ export default function App() {
       return;
     }
     
-    if (!confirm(`No.${s} から No.${e} までの問題を削除しますか？`)) return;
+    if (!confirm(`リストの No.${s} から No.${e} までの問題を削除しますか？`)) return;
 
     const targets = questions.slice(s - 1, e);
     if (targets.length === 0) {
@@ -601,6 +614,7 @@ export default function App() {
     if (!newQ.questionText || !newQ.category || !newQ.explanation) {
       alert('必須項目を入力してください'); return;
     }
+    // Manual creation doesn't strictly follow batch rules for simplicity, or assigns "M" batch
     let finalCorrectAnswer;
     const cleanOptions = newQ.options.filter(o => o.trim() !== '');
     if (newQ.type === 'input') {
@@ -619,7 +633,8 @@ export default function App() {
       options: newQ.type === 'input' ? [] : cleanOptions,
       correctAnswer: finalCorrectAnswer,
       explanation: newQ.explanation,
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      displayId: "Manual" // 手動追加用ID
     };
 
     try {
@@ -782,15 +797,29 @@ export default function App() {
             <h2 className="font-bold text-gray-800 flex items-center gap-2">
               <FileText className="text-blue-600" /> Excel/CSV一括登録
             </h2>
-            <div className="flex gap-3">
-              <Button onClick={downloadTemplate} variant="secondary" size="small" className="flex-1">
-                <Download size={16} /> 雛形DL
-              </Button>
-              <div className="relative flex-1">
-                <input type="file" accept=".csv" onChange={handleFileUpload} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
-                <Button variant="success" size="small" className="w-full">
-                  <Upload size={16} /> CSV読込
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 p-2 bg-blue-50 rounded-lg">
+                <span className="text-xs font-bold text-blue-700 whitespace-nowrap">今回アップロード回数:</span>
+                <Input 
+                  type="number" 
+                  value={uploadBatchNum} 
+                  onChange={(e) => setUploadBatchNum(e.target.value)}
+                  className="w-20 py-1 px-2 text-center text-sm h-8"
+                  placeholder="3"
+                />
+                <span className="text-xs text-blue-500">例: 3を入力→ 3_1, 3_2...</span>
+              </div>
+
+              <div className="flex gap-3">
+                <Button onClick={downloadTemplate} variant="secondary" size="small" className="flex-1">
+                  <Download size={16} /> 雛形DL
                 </Button>
+                <div className="relative flex-1">
+                  <input type="file" accept=".csv" onChange={handleFileUpload} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
+                  <Button variant="success" size="small" className="w-full">
+                    <Upload size={16} /> CSV読込
+                  </Button>
+                </div>
               </div>
             </div>
             {importStatus && <p className="text-sm font-bold text-center text-blue-600">{importStatus}</p>}
@@ -803,7 +832,7 @@ export default function App() {
             </h2>
             
             <div className="space-y-2">
-              <p className="text-sm font-bold text-gray-600">範囲指定削除 (No.で指定)</p>
+              <p className="text-sm font-bold text-gray-600">範囲指定削除 (リスト番号No.で指定)</p>
               <div className="flex gap-2 items-center">
                 <Input type="number" placeholder="開始No." value={deleteRange.start} onChange={e=>setDeleteRange({...deleteRange, start:e.target.value})} className="text-center"/>
                 <span className="text-gray-400 font-bold">〜</span>
@@ -829,9 +858,15 @@ export default function App() {
             <div className="space-y-3 max-h-[500px] overflow-y-auto pr-2">
               {questions.map((q, idx) => (
                 <div key={q.id} className="flex items-start gap-3 p-4 border border-gray-100 rounded-2xl hover:bg-gray-50 transition-colors">
-                  <span className="bg-gray-200 text-gray-600 text-xs font-bold px-2 py-1 rounded-md shrink-0 mt-0.5">
-                    No.{idx + 1}
-                  </span>
+                  <div className="flex flex-col gap-1 shrink-0 mt-0.5">
+                    <span className="bg-gray-200 text-gray-600 text-xs font-bold px-2 py-1 rounded-md text-center">
+                      No.{idx + 1}
+                    </span>
+                    {/* ★ 管理用ID表示 */}
+                    <span className="bg-blue-50 text-blue-600 text-[10px] font-bold px-1 py-0.5 rounded text-center border border-blue-100">
+                      {q.displayId || '-'}
+                    </span>
+                  </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1.5 flex-wrap">
                       <span className="text-[10px] bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full font-bold">{q.category}</span>
@@ -870,7 +905,6 @@ export default function App() {
       const normalize = (str) => str.replace(/\s+/g, '').toLowerCase();
       // ★★★ 記述式の別解対応（強化版） ★★★
       const normalizedInput = normalizeString(textInput);
-      
       const correctAnswers = currentQ.correctAnswer.split('|');
       isCorrectDisplay = correctAnswers.some(ans => normalizedInput === normalizeString(ans));
       
@@ -895,7 +929,10 @@ export default function App() {
           中断
         </button>
         <div className="font-bold text-gray-700 flex flex-col items-center leading-tight">
-          <span className="text-xs text-gray-400">Question</span>
+          {/* ★ ID表示の追加 */}
+          <div className="flex items-center gap-2">
+             <span className="text-xs text-gray-400">No.{currentQ?.displayId || (currentQuestionIndex + 1)}</span>
+          </div>
           <span className="text-lg">{currentQuestionIndex + 1} <span className="text-sm text-gray-400">/ {questions.length}</span></span>
         </div>
         <div className="w-12">
