@@ -48,12 +48,12 @@ const ADMIN_EMAIL = "2004ayumu0417@gmail.com"; // 管理者メールアドレス
 // --- Firebase Configuration (設定エリア) ---
 // 【重要】Firebaseコンソールからコピーした内容で、以下の { ... } の中身を書き換えてください。
 const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
-  apiKey: "ここにあなたのAPIキー",
-  authDomain: "ここにあなたのプロジェクトID.firebaseapp.com",
-  projectId: "ここにあなたのプロジェクトID",
-  storageBucket: "ここにあなたのプロジェクトID.firebasestorage.app",
-  messagingSenderId: "ここにあなたのSenderId",
-  appId: "ここにあなたのAppId"
+  apiKey: "AIzaSyBUaylHYEZNXL2jqojtILTaU0RrunJ6Rq0",
+  authDomain: "medical-study-a0154.firebaseapp.com",
+  projectId: "medical-study-a0154",
+  storageBucket: "medical-study-a0154.firebasestorage.app",
+  messagingSenderId: "422680487740",
+  appId: "1:422680487740:web:c9872f633f53469d7e6039"
 };
 
 // アプリの初期化
