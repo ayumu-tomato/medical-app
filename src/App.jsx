@@ -109,11 +109,10 @@ const shuffleArray = (array) => {
 const isAnswerMatch = (selectedOption, correctAnswer) => {
   if (!selectedOption || !correctAnswer) return false;
   
-  // 1. 完全一致 (例: "心不全" == "心不全")
+  // 1. 完全一致
   if (selectedOption === correctAnswer) return true;
   
   // 2. 先頭記号の一致 (例: selected="A. 心不全", correct="A")
-  // 区切り文字候補: ドット、カッコ、スペース、全角読点
   const separators = ['.', ')', ' ', '、']; 
   for (const sep of separators) {
     if (selectedOption.startsWith(correctAnswer + sep)) {
@@ -207,16 +206,22 @@ export default function App() {
   const [adminSelectedIndices, setAdminSelectedIndices] = useState([]);
   const [deleteRange, setDeleteRange] = useState({ start: '', end: '' });
 
-  // Quiz Hooks
+  // ★★★ 修正箇所：定義漏れしていた変数をここで定義 ★★★
   const currentQ = questions[currentQuestionIndex];
-  
-  // 選択肢のシャッフル
+  const isLastQuestion = questions.length > 0 && currentQuestionIndex === questions.length - 1;
+  const isReviewMode = mode === 'review';
+  const canCheck = currentQ 
+    ? (currentQ.type === 'input' ? textInput.length > 0 : selectedOptions.length > 0)
+    : false;
+
+  // 選択肢シャッフル
   const currentOptions = useMemo(() => {
     if (!currentQ || !Array.isArray(currentQ.options) || currentQ.type === 'input') {
       return [];
     }
     return shuffleArray(currentQ.options);
   }, [currentQ]);
+  // ★★★★★★★★★★★★★★★★★★★★★★★★★★★
 
   // --- Auth & Init ---
   useEffect(() => {
@@ -438,7 +443,6 @@ export default function App() {
       // ★ 柔軟な判定を使用（配列比較）
       const correctArr = Array.isArray(currentQ.correctAnswer) ? currentQ.correctAnswer : [currentQ.correctAnswer];
       
-      // 数が一致し、かつ、全ての選択肢が「どれかの正解」とマッチするか
       if (selectedOptions.length === correctArr.length) {
         isCorrect = selectedOptions.every(opt => 
           correctArr.some(ans => isAnswerMatch(opt, ans))
@@ -845,9 +849,7 @@ export default function App() {
     } else if (currentQ.type === 'multi') {
       // ★ 柔軟な判定を使用（配列比較）
       const correctArr = Array.isArray(currentQ.correctAnswer) ? currentQ.correctAnswer : [currentQ.correctAnswer];
-      const selectedSorted = [...selectedOptions].sort(); // 表示ロジック用（実際の判定はcheckAnswerで実施済だが、色付けのために再計算）
       
-      // 数が一致し、かつ、全ての選択肢が「どれかの正解」とマッチするか
       if (selectedOptions.length === correctArr.length) {
         isCorrectDisplay = selectedOptions.every(opt => 
           correctArr.some(ans => isAnswerMatch(opt, ans))
