@@ -252,7 +252,10 @@ export default function App() {
     // 選択肢がある場合、数字をインデックスとして解決してテキストに変換
     if (Array.isArray(currentQ.options) && currentQ.options.length > 0) {
         return raws.map(ans => {
-            const s = String(ans).trim();
+            let s = String(ans).trim();
+            // 全角数字を半角に変換 (例: "１" -> "1")
+            s = s.replace(/[０-９]/g, (s) => String.fromCharCode(s.charCodeAt(0) - 0xFEE0));
+
             // 半角数字のみの場合、インデックスとして扱う (例: "1" -> options[0])
             if (/^\d+$/.test(s)) {
                 const idx = parseInt(s, 10) - 1; // 1-based index to 0-based
