@@ -39,7 +39,7 @@ import {
   Trash2,
   List,
   AlertTriangle,
-  Hash
+  Search
 } from 'lucide-react';
 
 // --- Configuration ---
@@ -48,12 +48,12 @@ const ADMIN_EMAIL = "2004ayumu0417@gmail.com"; // 管理者メールアドレス
 // --- Firebase Configuration (設定エリア) ---
 // 【重要】Firebaseコンソールからコピーした内容で、以下の { ... } の中身を書き換えてください。
 const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
-  apiKey: "AIzaSyBUaylHYEZNXL2jqojtILTaU0RrunJ6Rq0",
-  authDomain: "medical-study-a0154.firebaseapp.com",
-  projectId: "medical-study-a0154",
-  storageBucket: "medical-study-a0154.firebasestorage.app",
-  messagingSenderId: "422680487740",
-  appId: "1:422680487740:web:c9872f633f53469d7e6039"
+  apiKey: "ここにあなたのAPIキー",
+  authDomain: "ここにあなたのプロジェクトID.firebaseapp.com",
+  projectId: "ここにあなたのプロジェクトID",
+  storageBucket: "ここにあなたのプロジェクトID.firebasestorage.app",
+  messagingSenderId: "ここにあなたのSenderId",
+  appId: "ここにあなたのAppId"
 };
 
 // アプリの初期化
@@ -135,7 +135,7 @@ const isAnswerMatch = (selectedOption, correctAnswer) => {
 const INITIAL_QUESTIONS = [
   {
     id: 'q1',
-    displayId: '1_1', // サンプル用ID
+    displayId: '1_1',
     type: 'single',
     category: '循環器',
     questionText: '僧帽弁閉鎖不全症(MR)の聴診所見として最も適切なものはどれか。',
@@ -193,7 +193,8 @@ export default function App() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState('auth');
-  const [questions, setQuestions] = useState([]);
+  const [allQuestions, setAllQuestions] = useState([]); // 全データ保持用
+  const [questions, setQuestions] = useState([]); // 出題用データ（フィルタリング後）
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [selectedOptions, setSelectedOptions] = useState([]); 
   const [textInput, setTextInput] = useState(''); 
@@ -209,13 +210,15 @@ export default function App() {
   // Quiz State
   const [isUnsure, setIsUnsure] = useState(false);
 
+  // Search State
+  const [searchId, setSearchId] = useState('');
+
   // Admin State
   const [newQ, setNewQ] = useState({
     type: 'single', category: '', questionText: '', options: ['', '', '', '', ''], correctAnswerInput: '', explanation: ''
   });
   const [adminSelectedIndices, setAdminSelectedIndices] = useState([]);
-  const [deleteRange, setDeleteRange] = useState({ start: '', end: '' });
-  // ★ 新機能: アップロードバッチ番号
+  const [deleteRange, setDeleteRange] = useState({ batch: '', start: '', end: '' });
   const [uploadBatchNum, setUploadBatchNum] = useState('1');
 
   // Quiz Hooks
@@ -237,14 +240,12 @@ export default function App() {
   // --- Auth & Init ---
   useEffect(() => {
     if (initError) return;
-
     const initAuth = async () => {
       if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
         await signInWithCustomToken(auth, __initial_auth_token);
       }
     };
     initAuth();
-
     const unsubscribe = onAuthStateChanged(auth, (u) => {
       setUser(u);
       setLoading(false);
@@ -274,18 +275,20 @@ export default function App() {
       } else {
         loadedQuestions = qSnap.docs.map(doc => ({...doc.data(), id: doc.id}));
       }
-      // ソート: displayIdがあればそれ順、なければ作成順
+      
+      // displayId (n_m) 順にソート
       loadedQuestions.sort((a, b) => {
         if (a.displayId && b.displayId) {
-           // n_m 形式のソート (例: 2_1 と 2_10 を正しく並べる)
            const [aBatch, aNum] = a.displayId.split('_').map(Number);
            const [bBatch, bNum] = b.displayId.split('_').map(Number);
-           if (aBatch !== bBatch) return aBatch - bBatch;
-           return aNum - bNum;
+           if (aBatch !== bBatch) return (aBatch || 0) - (bBatch || 0);
+           return (aNum || 0) - (bNum || 0);
         }
         return (a.createdAt || '').localeCompare(b.createdAt || '');
       });
-      setQuestions(loadedQuestions);
+      
+      setAllQuestions(loadedQuestions); // 全データを保存
+      setQuestions(loadedQuestions);    // 初期表示用
 
       const historyRef = collection(db, 'artifacts', appId, 'users', uid, 'history');
       const historySnap = await getDocs(historyRef);
@@ -318,6 +321,22 @@ export default function App() {
     if (!file) return;
     if (!uploadBatchNum || isNaN(parseInt(uploadBatchNum))) {
       alert("アップロード回数（バッチ番号）を入力してください");
+      // リセットして戻る
+      event.target.value = ''; 
+      return;
+    }
+
+    // ★ 重複チェック: 指定されたバッチ番号が既に存在するか
+    const isDuplicateBatch = allQuestions.some(q => {
+      if (!q.displayId) return false;
+      const parts = q.displayId.split('_');
+      return parts[0] === uploadBatchNum;
+    });
+
+    if (isDuplicateBatch) {
+      alert(`エラー: 第${uploadBatchNum}回のデータは既に存在します。\n別の番号を指定するか、既存のデータを削除してからアップロードしてください。`);
+      setImportStatus('エラー: バッチ番号重複');
+      event.target.value = ''; 
       return;
     }
 
@@ -344,7 +363,6 @@ export default function App() {
             correctAnswer = correctAnswerRaw.split('|').map(s => s.trim());
           }
           
-          // ★ displayIdの生成: バッチ番号_連番
           const displayId = `${uploadBatchNum}_${i - startIdx + 1}`;
 
           newQuestions.push({
@@ -355,7 +373,7 @@ export default function App() {
             correctAnswer,
             explanation: explanation.trim(),
             createdAt: new Date().toISOString(),
-            displayId: displayId // ★ ID保存
+            displayId: displayId
           });
         }
 
@@ -410,7 +428,8 @@ export default function App() {
   // --- Quiz Logic ---
   const startQuiz = (selectedMode) => {
     setMode(selectedMode);
-    let targetQuestions = [...questions];
+    // 必ず allQuestions から抽出する（フィルタリングによる消失を防ぐ）
+    let targetQuestions = [...allQuestions];
     
     if (selectedMode === 'review') {
       targetQuestions = targetQuestions.filter(q => {
@@ -445,6 +464,23 @@ export default function App() {
     setView('quiz');
   };
 
+  // ★ 検索して開始
+  const handleSearchQuiz = () => {
+    if (!searchId) return;
+    const target = allQuestions.find(q => q.displayId === searchId);
+    
+    if (!target) {
+      alert(`問題ID「${searchId}」は見つかりませんでした。`);
+      return;
+    }
+
+    setMode('search'); // 検索モードとして扱う
+    setQuestions([target]); // その1問だけをセット
+    setCurrentQuestionIndex(0);
+    resetQuestionState();
+    setView('quiz');
+  };
+
   const resetQuestionState = () => {
     setSelectedOptions([]);
     setTextInput('');
@@ -470,6 +506,7 @@ export default function App() {
     let isCorrect = false;
 
     if (currentQ.type === 'input') {
+      const normalize = (str) => str.replace(/\s+/g, '').toLowerCase();
       const normalizedInput = normalizeString(textInput);
       const correctAnswers = currentQ.correctAnswer.split('|');
       isCorrect = correctAnswers.some(ans => normalizedInput === normalizeString(ans));
@@ -536,7 +573,9 @@ export default function App() {
     if (!confirm("本当にこの問題を削除しますか？")) return;
     try {
       await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'questions', id));
-      setQuestions(prev => prev.filter(q => q.id !== id));
+      const newAll = allQuestions.filter(q => q.id !== id);
+      setAllQuestions(newAll);
+      setQuestions(newAll);
     } catch (error) {
       alert("削除失敗: " + error.message);
     }
@@ -560,6 +599,7 @@ export default function App() {
         await batch.commit();
       }
       
+      setAllQuestions([]);
       setQuestions([]);
       setImportStatus("全件削除完了");
       setTimeout(() => setImportStatus(''), 3000);
@@ -568,27 +608,36 @@ export default function App() {
     }
   };
 
+  // ★ バッチ番号＋範囲指定での削除
   const handleDeleteRange = async () => {
-    // ★ 管理者画面での削除も、IDではなく配列index基準のまま簡易実装
-    // displayIdでの削除は複雑になるため、今回は「リストで見えているNo」で削除する仕様を維持
+    const batchNumStr = deleteRange.batch;
     const s = parseInt(deleteRange.start);
     const e = parseInt(deleteRange.end);
     
-    if (isNaN(s) || isNaN(e) || s > e || s < 1) {
-      alert("有効な範囲を指定してください (例: 1 〜 10)");
+    if (!batchNumStr || isNaN(s) || isNaN(e) || s > e || s < 1) {
+      alert("有効な範囲を指定してください (例: バッチ3, 2〜50)");
       return;
     }
     
-    if (!confirm(`リストの No.${s} から No.${e} までの問題を削除しますか？`)) return;
+    if (!confirm(`ID ${batchNumStr}_${s} から ${batchNumStr}_${e} までの問題を削除しますか？`)) return;
 
-    const targets = questions.slice(s - 1, e);
+    // allQuestionsから対象を抽出
+    const targets = allQuestions.filter(q => {
+      if (!q.displayId) return false;
+      const parts = q.displayId.split('_');
+      if (parts.length !== 2) return false;
+      if (parts[0] !== batchNumStr) return false;
+      const num = parseInt(parts[1]);
+      return num >= s && num <= e;
+    });
+
     if (targets.length === 0) {
-      alert("指定された範囲に問題がありません");
+      alert("指定された範囲に問題が見つかりませんでした");
       return;
     }
 
     try {
-      setImportStatus("範囲削除中...");
+      setImportStatus(`${targets.length}件を削除中...`);
       const chunkSize = 500;
       for (let i = 0; i < targets.length; i += chunkSize) {
         const batch = writeBatch(db);
@@ -599,11 +648,14 @@ export default function App() {
         await batch.commit();
       }
       
+      // Update local state
       const deletedIds = new Set(targets.map(q => q.id));
-      setQuestions(prev => prev.filter(q => !deletedIds.has(q.id)));
+      const newAll = allQuestions.filter(q => !deletedIds.has(q.id));
+      setAllQuestions(newAll);
+      setQuestions(newAll);
       
       setImportStatus("削除完了");
-      setDeleteRange({ start: '', end: '' });
+      setDeleteRange({ batch: '', start: '', end: '' });
       setTimeout(() => setImportStatus(''), 3000);
     } catch (error) {
       alert("削除エラー: " + error.message);
@@ -614,7 +666,6 @@ export default function App() {
     if (!newQ.questionText || !newQ.category || !newQ.explanation) {
       alert('必須項目を入力してください'); return;
     }
-    // Manual creation doesn't strictly follow batch rules for simplicity, or assigns "M" batch
     let finalCorrectAnswer;
     const cleanOptions = newQ.options.filter(o => o.trim() !== '');
     if (newQ.type === 'input') {
@@ -634,12 +685,14 @@ export default function App() {
       correctAnswer: finalCorrectAnswer,
       explanation: newQ.explanation,
       createdAt: new Date().toISOString(),
-      displayId: "Manual" // 手動追加用ID
+      displayId: "Manual" 
     };
 
     try {
       const docRef = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'questions'), newQuestionData);
-      setQuestions([...questions, { ...newQuestionData, id: docRef.id }]);
+      const added = { ...newQuestionData, id: docRef.id };
+      setAllQuestions([...allQuestions, added]);
+      setQuestions([...allQuestions, added]);
       alert('追加しました');
       setNewQ({ type: 'single', category: '', questionText: '', options: ['', '', '', '', ''], correctAnswerInput: '', explanation: '' });
       setAdminSelectedIndices([]);
@@ -732,6 +785,19 @@ export default function App() {
             </div>
           </div>
 
+          {/* ID検索エリア */}
+          <div className="bg-white p-4 rounded-2xl shadow-sm border-2 border-gray-100 flex items-center gap-2">
+            <Input 
+              value={searchId}
+              onChange={(e) => setSearchId(e.target.value)}
+              placeholder="問題ID (例: 2_43)"
+              className="text-sm py-2"
+            />
+            <Button onClick={handleSearchQuiz} variant="secondary" size="small" className="shrink-0">
+              <Search size={18}/> 検索
+            </Button>
+          </div>
+
           <div className="grid gap-4">
             <button 
               onClick={() => startQuiz('all')}
@@ -743,7 +809,7 @@ export default function App() {
                 </div>
                 <div className="text-left">
                   <h3 className="font-bold text-gray-800 text-lg">全問演習</h3>
-                  <p className="text-sm text-gray-500 font-medium">登録問題をランダムに出題</p>
+                  <p className="text-sm text-gray-500 font-medium">未回答を優先して出題</p>
                 </div>
               </div>
               <ChevronRight className="text-gray-300 group-hover:text-blue-600" size={24} />
@@ -832,12 +898,17 @@ export default function App() {
             </h2>
             
             <div className="space-y-2">
-              <p className="text-sm font-bold text-gray-600">範囲指定削除 (リスト番号No.で指定)</p>
+              <p className="text-sm font-bold text-gray-600">ID範囲指定削除</p>
               <div className="flex gap-2 items-center">
+                <div className="w-20 shrink-0">
+                  <Input type="number" placeholder="回" value={deleteRange.batch} onChange={e=>setDeleteRange({...deleteRange, batch:e.target.value})} className="text-center"/>
+                </div>
+                <span className="text-gray-400 font-bold">の</span>
                 <Input type="number" placeholder="開始No." value={deleteRange.start} onChange={e=>setDeleteRange({...deleteRange, start:e.target.value})} className="text-center"/>
                 <span className="text-gray-400 font-bold">〜</span>
                 <Input type="number" placeholder="終了No." value={deleteRange.end} onChange={e=>setDeleteRange({...deleteRange, end:e.target.value})} className="text-center"/>
               </div>
+              <p className="text-xs text-gray-400 text-center">例: 「3」の「2」〜「50」→ ID 3_2 〜 3_50 を削除</p>
               <Button onClick={handleDeleteRange} variant="danger" size="small" className="w-full mt-2">
                 指定範囲を削除
               </Button>
