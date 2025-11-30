@@ -41,6 +41,9 @@ import {
   AlertTriangle
 } from 'lucide-react';
 
+// --- Configuration ---
+const ADMIN_EMAIL = "2004ayumu0417@gmail.com"; // 管理者メールアドレス
+
 // --- Firebase Configuration (設定エリア) ---
 // 【重要】Firebaseコンソールからコピーした内容で、以下の { ... } の中身を書き換えてください。
 const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
@@ -68,6 +71,17 @@ try {
 }
 
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'med-study-app';
+
+// --- Helper: String Normalizer (全角→半角、小文字化、スペース削除) ---
+const normalizeString = (str) => {
+  if (!str) return '';
+  // 全角英数字を半角に変換
+  let normalized = str.replace(/[Ａ-Ｚａ-ｚ０-９]/g, (s) => {
+    return String.fromCharCode(s.charCodeAt(0) - 0xFEE0);
+  });
+  // スペース削除、小文字化
+  return normalized.replace(/\s+/g, '').toLowerCase();
+};
 
 // --- Helper: CSV Parser ---
 const parseCSVLine = (text) => {
@@ -262,8 +276,7 @@ export default function App() {
       } else {
         loadedQuestions = qSnap.docs.map(doc => ({...doc.data(), id: doc.id}));
       }
-      // ソートは出題時に行うので、ここでは単純なID順などでOK（シャッフル前）
-      // loadedQuestions.sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''));
+      loadedQuestions.sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''));
       setQuestions(loadedQuestions);
 
       const historyRef = collection(db, 'artifacts', appId, 'users', uid, 'history');
@@ -280,7 +293,8 @@ export default function App() {
   const downloadTemplate = () => {
     const headers = "type,category,questionText,correctAnswer,option1,option2,option3,option4,option5,explanation";
     const example1 = 'single,循環器,"MRの聴診所見は？",全収縮期雑音,拡張期ランブル,収縮期駆出性雑音,全収縮期雑音,連続性雑音,拡張早期灌水様雑音,"解説文です"';
-    const csvContent = "\uFEFF" + [headers, example1].join("\n");
+    const example2 = 'input,内分泌,"バセドウ病の抗体は？(4文字)",TRAb|TSH受容体抗体,,,,,,,"解説文です"';
+    const csvContent = "\uFEFF" + [headers, example1, example2].join("\n");
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -383,7 +397,6 @@ export default function App() {
     let targetQuestions = [...questions];
     
     if (selectedMode === 'review') {
-      // 復習モード
       targetQuestions = targetQuestions.filter(q => {
         const hist = userHistory[q.id];
         if (!hist) return false; 
@@ -401,15 +414,12 @@ export default function App() {
         return;
       }
     } else {
-      // ★★★ 全問演習モード：未回答を優先 ★★★
       const notAnswered = targetQuestions.filter(q => !userHistory[q.id]);
       const answered = targetQuestions.filter(q => userHistory[q.id]);
       
-      // それぞれをシャッフル
       const shuffledNotAnswered = shuffleArray(notAnswered);
       const shuffledAnswered = shuffleArray(answered);
       
-      // 未回答 -> 既回答 の順に結合
       targetQuestions = [...shuffledNotAnswered, ...shuffledAnswered];
     }
 
@@ -444,12 +454,12 @@ export default function App() {
     let isCorrect = false;
 
     if (currentQ.type === 'input') {
-      // ★★★ 記述式の別解対応 ★★★
-      const normalize = (str) => str.replace(/\s+/g, '').toLowerCase();
-      // 正解がパイプ区切りなら分割して配列化
+      // ★★★ 記述式の別解対応（強化版） ★★★
+      const normalizedInput = normalizeString(textInput);
+      
+      // 正解がパイプ区切りの場合、いずれかに一致すれば正解
       const correctAnswers = currentQ.correctAnswer.split('|');
-      // どれか1つでも一致すれば正解
-      isCorrect = correctAnswers.some(ans => normalize(textInput) === normalize(ans));
+      isCorrect = correctAnswers.some(ans => normalizedInput === normalizeString(ans));
       
     } else if (currentQ.type === 'single') {
       isCorrect = isAnswerMatch(selectedOptions[0], currentQ.correctAnswer);
@@ -742,11 +752,14 @@ export default function App() {
             </button>
           </div>
 
-          <div className="pt-6 border-t border-gray-200">
-             <button onClick={() => setView('admin')} className="w-full bg-gray-100 hover:bg-gray-200 text-gray-600 font-bold p-4 rounded-2xl flex items-center justify-center gap-2 transition-colors">
-              <Plus size={20} /> 問題の追加・管理
-            </button>
-          </div>
+          {/* 管理者のみ表示 */}
+          {user?.email === ADMIN_EMAIL && (
+            <div className="pt-6 border-t border-gray-200">
+               <button onClick={() => setView('admin')} className="w-full bg-gray-100 hover:bg-gray-200 text-gray-600 font-bold p-4 rounded-2xl flex items-center justify-center gap-2 transition-colors">
+                <Plus size={20} /> 問題の追加・管理
+              </button>
+            </div>
+          )}
         </main>
       </div>
     );
@@ -855,10 +868,11 @@ export default function App() {
   if (showExplanation && currentQ) {
     if (currentQ.type === 'input') {
       const normalize = (str) => str.replace(/\s+/g, '').toLowerCase();
-      // ★★★ 修正箇所：別解判定ロジック ★★★
-      // 正解がパイプ区切りの場合、いずれかに一致すれば正解表示（緑色）にする
+      // ★★★ 記述式の別解対応（強化版） ★★★
+      const normalizedInput = normalizeString(textInput);
+      
       const correctAnswers = currentQ.correctAnswer.split('|');
-      isCorrectDisplay = correctAnswers.some(ans => normalize(textInput) === normalize(ans));
+      isCorrectDisplay = correctAnswers.some(ans => normalizedInput === normalizeString(ans));
       
     } else if (currentQ.type === 'single') {
       isCorrectDisplay = isAnswerMatch(selectedOptions[0], currentQ.correctAnswer);
