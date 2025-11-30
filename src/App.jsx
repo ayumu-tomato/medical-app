@@ -240,7 +240,7 @@ export default function App() {
   }, [currentQ]);
 
   // ★ 正解データの正規化（数字指定をテキストに変換）
-  // type: multi の場合、"1|3" のようなインデックス指定を選択肢テキストに変換して配列化する
+  // type: multi, single に関わらず、選択肢がある場合は数字をインデックスとして解決してテキストに変換
   const normalizedCorrectAnswers = useMemo(() => {
     if (!currentQ) return [];
     
@@ -249,8 +249,8 @@ export default function App() {
         ? currentQ.correctAnswer 
         : (typeof currentQ.correctAnswer === 'string' ? currentQ.correctAnswer.split('|') : [currentQ.correctAnswer]);
     
-    // multiタイプかつ選択肢がある場合、数字をインデックスとして解決してテキストに変換
-    if (currentQ.type === 'multi' && Array.isArray(currentQ.options) && currentQ.options.length > 0) {
+    // 選択肢がある場合、数字をインデックスとして解決してテキストに変換
+    if (Array.isArray(currentQ.options) && currentQ.options.length > 0) {
         return raws.map(ans => {
             const s = String(ans).trim();
             // 半角数字のみの場合、インデックスとして扱う (例: "1" -> options[0])
@@ -538,7 +538,8 @@ export default function App() {
       const correctAnswers = currentQ.correctAnswer.split('|');
       isCorrect = correctAnswers.some(ans => normalizedInput === normalizeString(ans));
     } else if (currentQ.type === 'single') {
-      isCorrect = isAnswerMatch(selectedOptions[0], currentQ.correctAnswer);
+      // ★ 修正: singleの場合も正規化済みの正解(テキスト)を使用
+      isCorrect = isAnswerMatch(selectedOptions[0], normalizedCorrectAnswers[0]);
     } else if (currentQ.type === 'multi') {
       // ★ 修正: 数字指定にも対応した normalizedCorrectAnswers を使って判定
       const correctArr = normalizedCorrectAnswers;
@@ -1006,7 +1007,8 @@ export default function App() {
       isCorrectDisplay = correctAnswers.some(ans => normalizedInput === normalizeString(ans));
       
     } else if (currentQ.type === 'single') {
-      isCorrectDisplay = isAnswerMatch(selectedOptions[0], currentQ.correctAnswer);
+      // ★ 修正: singleの場合も正規化済みの正解(テキスト)を使用
+      isCorrectDisplay = isAnswerMatch(selectedOptions[0], normalizedCorrectAnswers[0]);
     } else if (currentQ.type === 'multi') {
       // ★ 修正: 数字指定にも対応した normalizedCorrectAnswers を使って判定
       const correctArr = normalizedCorrectAnswers;
@@ -1068,7 +1070,7 @@ export default function App() {
                   let styleClass = "border-2 border-gray-100 hover:bg-gray-50 hover:border-gray-200";
                   
                   if (showExplanation) {
-                    const correctArr = Array.isArray(currentQ.correctAnswer) ? currentQ.correctAnswer : [currentQ.correctAnswer];
+                    const correctArr = normalizedCorrectAnswers;
                     const isAnswer = correctArr.some(ans => isAnswerMatch(option, ans));
 
                     if (isAnswer) styleClass = "bg-emerald-50 border-emerald-500 text-emerald-700 font-bold";
@@ -1085,7 +1087,8 @@ export default function App() {
                       <span>{option}</span>
                       {isSelected && !showExplanation && <CheckCircle size={20} className="text-blue-600 fill-blue-50"/>}
                       {showExplanation && (
-                        (Array.isArray(currentQ.correctAnswer) ? currentQ.correctAnswer.some(ans => isAnswerMatch(option, ans)) : isAnswerMatch(option, currentQ.correctAnswer))
+                        /* ★ 柔軟な判定を使ってアイコン表示 */
+                        (normalizedCorrectAnswers.some(ans => isAnswerMatch(option, ans)))
                         ? <CheckCircle size={20} className="text-emerald-600 fill-emerald-100"/> 
                         : (isSelected && <XCircle size={20} className="text-red-400 fill-red-50"/>)
                       )}
@@ -1129,10 +1132,10 @@ export default function App() {
             <div className="bg-white/60 rounded-xl p-4 mb-4">
               <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">正解</p>
               <p className="text-lg font-bold text-gray-900 break-words">
-                {/* 記述式の場合、パイプ区切りを見やすく表示 */}
+                {/* inputなら / 区切り、それ以外は , 区切りで見やすく表示 (normalizedを使用) */}
                 {currentQ.type === 'input' 
                   ? currentQ.correctAnswer.split('|').join(' / ') 
-                  : (Array.isArray(currentQ.correctAnswer) ? currentQ.correctAnswer.join(', ') : currentQ.correctAnswer)}
+                  : normalizedCorrectAnswers.join(', ')}
               </p>
             </div>
 
