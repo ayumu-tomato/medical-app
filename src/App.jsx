@@ -121,7 +121,9 @@ const shuffleArray = (array) => {
 // --- Helper: Answer Matcher ---
 const isAnswerMatch = (selectedOption, correctAnswer) => {
   if (!selectedOption || !correctAnswer) return false;
+  // 完全一致
   if (selectedOption === correctAnswer) return true;
+  // 先頭記号一致 (A. XX -> A)
   const separators = ['.', ')', ' ', '、']; 
   for (const sep of separators) {
     if (selectedOption.startsWith(correctAnswer + sep)) {
@@ -194,7 +196,7 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState('auth');
   const [allQuestions, setAllQuestions] = useState([]); // 全データ保持用
-  const [questions, setQuestions] = useState([]); // 出題用データ（フィルタリング後）
+  const [questions, setQuestions] = useState([]); // 出題用データ
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [selectedOptions, setSelectedOptions] = useState([]); 
   const [textInput, setTextInput] = useState(''); 
@@ -235,6 +237,33 @@ export default function App() {
       return [];
     }
     return shuffleArray(currentQ.options);
+  }, [currentQ]);
+
+  // ★ 正解データの正規化（数字指定をテキストに変換）
+  // type: multi の場合、"1|3" のようなインデックス指定を選択肢テキストに変換して配列化する
+  const normalizedCorrectAnswers = useMemo(() => {
+    if (!currentQ) return [];
+    
+    // まずは配列化（パイプ区切り対応）
+    let raws = Array.isArray(currentQ.correctAnswer) 
+        ? currentQ.correctAnswer 
+        : (typeof currentQ.correctAnswer === 'string' ? currentQ.correctAnswer.split('|') : [currentQ.correctAnswer]);
+    
+    // multiタイプかつ選択肢がある場合、数字をインデックスとして解決してテキストに変換
+    if (currentQ.type === 'multi' && Array.isArray(currentQ.options) && currentQ.options.length > 0) {
+        return raws.map(ans => {
+            const s = String(ans).trim();
+            // 半角数字のみの場合、インデックスとして扱う (例: "1" -> options[0])
+            if (/^\d+$/.test(s)) {
+                const idx = parseInt(s, 10) - 1; // 1-based index to 0-based
+                if (idx >= 0 && idx < currentQ.options.length) {
+                    return currentQ.options[idx];
+                }
+            }
+            return ans; // 数字でなければ（または範囲外なら）そのまま返す
+        });
+    }
+    return raws;
   }, [currentQ]);
 
   // --- Auth & Init ---
@@ -287,8 +316,8 @@ export default function App() {
         return (a.createdAt || '').localeCompare(b.createdAt || '');
       });
       
-      setAllQuestions(loadedQuestions); // 全データを保存
-      setQuestions(loadedQuestions);    // 初期表示用
+      setAllQuestions(loadedQuestions);
+      setQuestions(loadedQuestions);
 
       const historyRef = collection(db, 'artifacts', appId, 'users', uid, 'history');
       const historySnap = await getDocs(historyRef);
@@ -321,12 +350,11 @@ export default function App() {
     if (!file) return;
     if (!uploadBatchNum || isNaN(parseInt(uploadBatchNum))) {
       alert("アップロード回数（バッチ番号）を入力してください");
-      // リセットして戻る
       event.target.value = ''; 
       return;
     }
 
-    // ★ 重複チェック: 指定されたバッチ番号が既に存在するか
+    // 重複チェック
     const isDuplicateBatch = allQuestions.some(q => {
       if (!q.displayId) return false;
       const parts = q.displayId.split('_');
@@ -428,7 +456,6 @@ export default function App() {
   // --- Quiz Logic ---
   const startQuiz = (selectedMode) => {
     setMode(selectedMode);
-    // 必ず allQuestions から抽出する（フィルタリングによる消失を防ぐ）
     let targetQuestions = [...allQuestions];
     
     if (selectedMode === 'review') {
@@ -464,7 +491,7 @@ export default function App() {
     setView('quiz');
   };
 
-  // ★ 検索して開始
+  // Search
   const handleSearchQuiz = () => {
     if (!searchId) return;
     const target = allQuestions.find(q => q.displayId === searchId);
@@ -474,8 +501,8 @@ export default function App() {
       return;
     }
 
-    setMode('search'); // 検索モードとして扱う
-    setQuestions([target]); // その1問だけをセット
+    setMode('search');
+    setQuestions([target]); 
     setCurrentQuestionIndex(0);
     resetQuestionState();
     setView('quiz');
@@ -513,7 +540,9 @@ export default function App() {
     } else if (currentQ.type === 'single') {
       isCorrect = isAnswerMatch(selectedOptions[0], currentQ.correctAnswer);
     } else if (currentQ.type === 'multi') {
-      const correctArr = Array.isArray(currentQ.correctAnswer) ? currentQ.correctAnswer : [currentQ.correctAnswer];
+      // ★ 修正: 数字指定にも対応した normalizedCorrectAnswers を使って判定
+      const correctArr = normalizedCorrectAnswers;
+      
       if (selectedOptions.length === correctArr.length) {
         isCorrect = selectedOptions.every(opt => 
           correctArr.some(ans => isAnswerMatch(opt, ans))
@@ -608,7 +637,6 @@ export default function App() {
     }
   };
 
-  // ★ バッチ番号＋範囲指定での削除
   const handleDeleteRange = async () => {
     const batchNumStr = deleteRange.batch;
     const s = parseInt(deleteRange.start);
@@ -621,7 +649,6 @@ export default function App() {
     
     if (!confirm(`ID ${batchNumStr}_${s} から ${batchNumStr}_${e} までの問題を削除しますか？`)) return;
 
-    // allQuestionsから対象を抽出
     const targets = allQuestions.filter(q => {
       if (!q.displayId) return false;
       const parts = q.displayId.split('_');
@@ -648,7 +675,6 @@ export default function App() {
         await batch.commit();
       }
       
-      // Update local state
       const deletedIds = new Set(targets.map(q => q.id));
       const newAll = allQuestions.filter(q => !deletedIds.has(q.id));
       setAllQuestions(newAll);
@@ -982,7 +1008,9 @@ export default function App() {
     } else if (currentQ.type === 'single') {
       isCorrectDisplay = isAnswerMatch(selectedOptions[0], currentQ.correctAnswer);
     } else if (currentQ.type === 'multi') {
-      const correctArr = Array.isArray(currentQ.correctAnswer) ? currentQ.correctAnswer : [currentQ.correctAnswer];
+      // ★ 修正: 数字指定にも対応した normalizedCorrectAnswers を使って判定
+      const correctArr = normalizedCorrectAnswers;
+      
       if (selectedOptions.length === correctArr.length) {
         isCorrectDisplay = selectedOptions.every(opt => 
           correctArr.some(ans => isAnswerMatch(opt, ans))
