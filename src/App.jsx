@@ -122,7 +122,9 @@ const shuffleArray = (array) => {
 // --- Helper: Answer Matcher ---
 const isAnswerMatch = (selectedOption, correctAnswer) => {
   if (!selectedOption || !correctAnswer) return false;
+  // 完全一致
   if (selectedOption === correctAnswer) return true;
+  // 先頭記号一致 (A. XX -> A)
   const separators = ['.', ')', ' ', '、']; 
   for (const sep of separators) {
     if (selectedOption.startsWith(correctAnswer + sep)) {
@@ -194,8 +196,8 @@ export default function App() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState('auth');
-  const [allQuestions, setAllQuestions] = useState([]); 
-  const [questions, setQuestions] = useState([]); 
+  const [allQuestions, setAllQuestions] = useState([]); // 全データ保持用
+  const [questions, setQuestions] = useState([]); // 出題用データ
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [selectedOptions, setSelectedOptions] = useState([]); 
   const [textInput, setTextInput] = useState(''); 
@@ -238,24 +240,31 @@ export default function App() {
     return shuffleArray(currentQ.options);
   }, [currentQ]);
 
-  // 正解データの正規化
+  // ★ 正解データの正規化（数字指定をテキストに変換）
+  // type: multi, single に関わらず、選択肢がある場合は数字をインデックスとして解決してテキストに変換
   const normalizedCorrectAnswers = useMemo(() => {
     if (!currentQ) return [];
+    
+    // まずは配列化（パイプ区切り対応）
     let raws = Array.isArray(currentQ.correctAnswer) 
         ? currentQ.correctAnswer 
         : (typeof currentQ.correctAnswer === 'string' ? currentQ.correctAnswer.split('|') : [currentQ.correctAnswer]);
     
+    // 選択肢がある場合、数字をインデックスとして解決してテキストに変換
     if (Array.isArray(currentQ.options) && currentQ.options.length > 0) {
         return raws.map(ans => {
             let s = String(ans).trim();
+            // 全角数字を半角に変換 (例: "１" -> "1")
             s = s.replace(/[０-９]/g, (s) => String.fromCharCode(s.charCodeAt(0) - 0xFEE0));
+
+            // 半角数字のみの場合、インデックスとして扱う (例: "1" -> options[0])
             if (/^\d+$/.test(s)) {
-                const idx = parseInt(s, 10) - 1; 
+                const idx = parseInt(s, 10) - 1; // 1-based index to 0-based
                 if (idx >= 0 && idx < currentQ.options.length) {
                     return currentQ.options[idx];
                 }
             }
-            return ans;
+            return ans; // 数字でなければ（または範囲外なら）そのまま返す
         });
     }
     return raws;
@@ -309,6 +318,7 @@ export default function App() {
         loadedQuestions = qSnap.docs.map(doc => ({...doc.data(), id: doc.id}));
       }
       
+      // displayId (n_m) 順にソート
       loadedQuestions.sort((a, b) => {
         if (a.displayId && b.displayId) {
            const [aBatch, aNum] = a.displayId.split('_').map(Number);
@@ -357,6 +367,7 @@ export default function App() {
       return;
     }
 
+    // 重複チェック
     const isDuplicateBatch = allQuestions.some(q => {
       if (!q.displayId) return false;
       const parts = q.displayId.split('_');
@@ -517,13 +528,16 @@ export default function App() {
     setView('quiz');
   };
 
+  // Search
   const handleSearchQuiz = () => {
     if (!searchId) return;
     const target = allQuestions.find(q => q.displayId === searchId);
+    
     if (!target) {
       alert(`問題ID「${searchId}」は見つかりませんでした。`);
       return;
     }
+
     setMode('search');
     setQuestions([target]); 
     setCurrentQuestionIndex(0);
@@ -540,6 +554,7 @@ export default function App() {
 
   const handleOptionSelect = (option) => {
     if (showExplanation) return;
+
     if (currentQ.type === 'single') {
       setSelectedOptions([option]);
     } else if (currentQ.type === 'multi') {
@@ -560,9 +575,12 @@ export default function App() {
       const correctAnswers = currentQ.correctAnswer.split('|');
       isCorrect = correctAnswers.some(ans => normalizedInput === normalizeString(ans));
     } else if (currentQ.type === 'single') {
+      // ★ 修正: singleの場合も正規化済みの正解(テキスト)を使用
       isCorrect = isAnswerMatch(selectedOptions[0], normalizedCorrectAnswers[0]);
     } else if (currentQ.type === 'multi') {
+      // ★ 修正: 数字指定にも対応した normalizedCorrectAnswers を使って判定
       const correctArr = normalizedCorrectAnswers;
+      
       if (selectedOptions.length === correctArr.length) {
         isCorrect = selectedOptions.every(opt => 
           correctArr.some(ans => isAnswerMatch(opt, ans))
@@ -642,13 +660,16 @@ export default function App() {
       setImportStatus("削除中...");
       const qRef = collection(db, 'artifacts', appId, 'public', 'data', 'questions');
       const snapshot = await getDocs(qRef);
+      
       const chunkSize = 500;
       const docs = snapshot.docs;
+      
       for (let i = 0; i < docs.length; i += chunkSize) {
         const batch = writeBatch(db);
         docs.slice(i, i + chunkSize).forEach(doc => batch.delete(doc.ref));
         await batch.commit();
       }
+      
       setAllQuestions([]);
       setQuestions([]);
       setImportStatus("全件削除完了");
@@ -662,10 +683,12 @@ export default function App() {
     const batchNumStr = deleteRange.batch;
     const s = parseInt(deleteRange.start);
     const e = parseInt(deleteRange.end);
+    
     if (!batchNumStr || isNaN(s) || isNaN(e) || s > e || s < 1) {
       alert("有効な範囲を指定してください (例: バッチ3, 2〜50)");
       return;
     }
+    
     if (!confirm(`ID ${batchNumStr}_${s} から ${batchNumStr}_${e} までの問題を削除しますか？`)) return;
 
     const targets = allQuestions.filter(q => {
@@ -693,10 +716,12 @@ export default function App() {
         });
         await batch.commit();
       }
+      
       const deletedIds = new Set(targets.map(q => q.id));
       const newAll = allQuestions.filter(q => !deletedIds.has(q.id));
       setAllQuestions(newAll);
       setQuestions(newAll);
+      
       setImportStatus("削除完了");
       setDeleteRange({ batch: '', start: '', end: '' });
       setTimeout(() => setImportStatus(''), 3000);
@@ -748,9 +773,14 @@ export default function App() {
     return (
       <div className="min-h-screen flex items-center justify-center bg-red-50 p-6">
         <div className="bg-white p-8 rounded-2xl shadow-xl max-w-md text-center">
-          <AlertCircle className="text-red-500 w-12 h-12 mx-auto mb-4" />
+          <div className="bg-red-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
+            <AlertCircle className="text-red-500 w-8 h-8" />
+          </div>
           <h2 className="text-xl font-bold text-gray-800 mb-2">設定エラー</h2>
-          <p className="text-gray-600 text-sm">APIキーの設定を確認してください。</p>
+          <p className="text-gray-600 mb-4 break-all text-sm">{initError}</p>
+          <p className="text-xs text-gray-400 bg-gray-100 p-2 rounded text-left">
+            App.jsxの36行目付近にある「firebaseConfig」の設定を確認してください。
+          </p>
         </div>
       </div>
     );
@@ -766,7 +796,7 @@ export default function App() {
             <div className="bg-blue-600 w-20 h-20 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-blue-200">
               <Brain className="text-white w-10 h-10" />
             </div>
-            <h1 className="text-2xl font-bold text-gray-800">Medical QB</h1>
+            <h1 className="text-2xl font-bold text-gray-800">MediPass</h1>
             <p className="text-gray-500 mt-2">国家試験対策学習アプリ</p>
           </div>
           <form onSubmit={handleAuth} className="space-y-4">
@@ -799,7 +829,7 @@ export default function App() {
       <div className="min-h-screen bg-gray-50 pb-32">
         <header className="bg-white shadow-sm px-6 py-4 flex justify-between items-center sticky top-0 z-20 safe-area-top">
           <h1 className="text-xl font-bold text-gray-800 flex items-center gap-2">
-            <Activity className="text-blue-600 fill-blue-600" /> Medical QB
+            <Activity className="text-blue-600 fill-blue-600" /> MediPass
           </h1>
           <button onClick={() => {signOut(auth); setView('auth');}} className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors">
             <LogOut size={24} />
