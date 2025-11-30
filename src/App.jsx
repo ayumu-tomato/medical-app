@@ -206,7 +206,7 @@ export default function App() {
   const [adminSelectedIndices, setAdminSelectedIndices] = useState([]);
   const [deleteRange, setDeleteRange] = useState({ start: '', end: '' });
 
-  // ★★★ 修正箇所：定義漏れしていた変数をここで定義 ★★★
+  // Quiz Hooks
   const currentQ = questions[currentQuestionIndex];
   const isLastQuestion = questions.length > 0 && currentQuestionIndex === questions.length - 1;
   const isReviewMode = mode === 'review';
@@ -221,7 +221,6 @@ export default function App() {
     }
     return shuffleArray(currentQ.options);
   }, [currentQ]);
-  // ★★★★★★★★★★★★★★★★★★★★★★★★★★★
 
   // --- Auth & Init ---
   useEffect(() => {
@@ -263,7 +262,8 @@ export default function App() {
       } else {
         loadedQuestions = qSnap.docs.map(doc => ({...doc.data(), id: doc.id}));
       }
-      loadedQuestions.sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''));
+      // ソートは出題時に行うので、ここでは単純なID順などでOK（シャッフル前）
+      // loadedQuestions.sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''));
       setQuestions(loadedQuestions);
 
       const historyRef = collection(db, 'artifacts', appId, 'users', uid, 'history');
@@ -383,6 +383,7 @@ export default function App() {
     let targetQuestions = [...questions];
     
     if (selectedMode === 'review') {
+      // 復習モード
       targetQuestions = targetQuestions.filter(q => {
         const hist = userHistory[q.id];
         if (!hist) return false; 
@@ -400,7 +401,16 @@ export default function App() {
         return;
       }
     } else {
-      targetQuestions.sort(() => Math.random() - 0.5);
+      // ★★★ 全問演習モード：未回答を優先 ★★★
+      const notAnswered = targetQuestions.filter(q => !userHistory[q.id]);
+      const answered = targetQuestions.filter(q => userHistory[q.id]);
+      
+      // それぞれをシャッフル
+      const shuffledNotAnswered = shuffleArray(notAnswered);
+      const shuffledAnswered = shuffleArray(answered);
+      
+      // 未回答 -> 既回答 の順に結合
+      targetQuestions = [...shuffledNotAnswered, ...shuffledAnswered];
     }
 
     setQuestions(targetQuestions);
@@ -434,13 +444,16 @@ export default function App() {
     let isCorrect = false;
 
     if (currentQ.type === 'input') {
+      // ★★★ 記述式の別解対応 ★★★
       const normalize = (str) => str.replace(/\s+/g, '').toLowerCase();
-      isCorrect = normalize(textInput) === normalize(currentQ.correctAnswer);
+      // 正解がパイプ区切りなら分割して配列化
+      const correctAnswers = currentQ.correctAnswer.split('|');
+      // どれか1つでも一致すれば正解
+      isCorrect = correctAnswers.some(ans => normalize(textInput) === normalize(ans));
+      
     } else if (currentQ.type === 'single') {
-      // ★ 柔軟な判定を使用
       isCorrect = isAnswerMatch(selectedOptions[0], currentQ.correctAnswer);
     } else if (currentQ.type === 'multi') {
-      // ★ 柔軟な判定を使用（配列比較）
       const correctArr = Array.isArray(currentQ.correctAnswer) ? currentQ.correctAnswer : [currentQ.correctAnswer];
       
       if (selectedOptions.length === correctArr.length) {
@@ -842,14 +855,15 @@ export default function App() {
   if (showExplanation && currentQ) {
     if (currentQ.type === 'input') {
       const normalize = (str) => str.replace(/\s+/g, '').toLowerCase();
-      isCorrectDisplay = normalize(textInput) === normalize(currentQ.correctAnswer);
+      // ★★★ 修正箇所：別解判定ロジック ★★★
+      // 正解がパイプ区切りの場合、いずれかに一致すれば正解表示（緑色）にする
+      const correctAnswers = currentQ.correctAnswer.split('|');
+      isCorrectDisplay = correctAnswers.some(ans => normalize(textInput) === normalize(ans));
+      
     } else if (currentQ.type === 'single') {
-      // ★ 柔軟な判定を使用
       isCorrectDisplay = isAnswerMatch(selectedOptions[0], currentQ.correctAnswer);
     } else if (currentQ.type === 'multi') {
-      // ★ 柔軟な判定を使用（配列比較）
       const correctArr = Array.isArray(currentQ.correctAnswer) ? currentQ.correctAnswer : [currentQ.correctAnswer];
-      
       if (selectedOptions.length === correctArr.length) {
         isCorrectDisplay = selectedOptions.every(opt => 
           correctArr.some(ans => isAnswerMatch(opt, ans))
@@ -904,7 +918,6 @@ export default function App() {
                   let styleClass = "border-2 border-gray-100 hover:bg-gray-50 hover:border-gray-200";
                   
                   if (showExplanation) {
-                    // ★ 柔軟な判定を使って色分け
                     const correctArr = Array.isArray(currentQ.correctAnswer) ? currentQ.correctAnswer : [currentQ.correctAnswer];
                     const isAnswer = correctArr.some(ans => isAnswerMatch(option, ans));
 
@@ -922,7 +935,6 @@ export default function App() {
                       <span>{option}</span>
                       {isSelected && !showExplanation && <CheckCircle size={20} className="text-blue-600 fill-blue-50"/>}
                       {showExplanation && (
-                        /* ★ 柔軟な判定を使ってアイコン表示 */
                         (Array.isArray(currentQ.correctAnswer) ? currentQ.correctAnswer.some(ans => isAnswerMatch(option, ans)) : isAnswerMatch(option, currentQ.correctAnswer))
                         ? <CheckCircle size={20} className="text-emerald-600 fill-emerald-100"/> 
                         : (isSelected && <XCircle size={20} className="text-red-400 fill-red-50"/>)
@@ -967,7 +979,10 @@ export default function App() {
             <div className="bg-white/60 rounded-xl p-4 mb-4">
               <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">正解</p>
               <p className="text-lg font-bold text-gray-900 break-words">
-                {Array.isArray(currentQ.correctAnswer) ? currentQ.correctAnswer.join(', ') : currentQ.correctAnswer}
+                {/* 記述式の場合、パイプ区切りを見やすく表示 */}
+                {currentQ.type === 'input' 
+                  ? currentQ.correctAnswer.split('|').join(' / ') 
+                  : (Array.isArray(currentQ.correctAnswer) ? currentQ.correctAnswer.join(', ') : currentQ.correctAnswer)}
               </p>
             </div>
 
