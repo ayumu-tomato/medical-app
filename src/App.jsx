@@ -41,7 +41,9 @@ import {
   AlertTriangle,
   Search,
   History,
-  Filter
+  Filter,
+  Award,
+  Home
 } from 'lucide-react';
 
 // --- Configuration ---
@@ -211,6 +213,7 @@ export default function App() {
   
   // Quiz State
   const [isUnsure, setIsUnsure] = useState(false);
+  const [sessionStats, setSessionStats] = useState({ correct: 0, total: 0 }); // ★ セッションスコア
 
   // Custom Quiz State
   const [customBatch, setCustomBatch] = useState('');
@@ -480,9 +483,12 @@ export default function App() {
       });
 
       targetQuestions.sort((a, b) => {
-        const countA = userHistory[a.id]?.wrongCount || 0;
-        const countB = userHistory[b.id]?.wrongCount || 0;
-        return countB - countA;
+        const histA = userHistory[a.id];
+        const histB = userHistory[b.id];
+        const rateA = (histA.attemptCount > 0) ? (histA.wrongCount / histA.attemptCount) : 0;
+        const rateB = (histB.attemptCount > 0) ? (histB.wrongCount / histB.attemptCount) : 0;
+        if (Math.abs(rateA - rateB) > 0.0001) return rateB - rateA;
+        return histB.wrongCount - histA.wrongCount;
       });
 
       if (targetQuestions.length === 0) {
@@ -490,7 +496,6 @@ export default function App() {
         return;
       }
     } else {
-      // 全問演習（未回答優先）
       const notAnswered = targetQuestions.filter(q => !userHistory[q.id]);
       const answered = targetQuestions.filter(q => userHistory[q.id]);
       
@@ -503,10 +508,11 @@ export default function App() {
     setQuestions(targetQuestions);
     setCurrentQuestionIndex(0);
     resetQuestionState();
+    setSessionStats({ correct: 0, total: targetQuestions.length }); // ★リセット
     setView('quiz');
   };
 
-  // ★ カスタム演習（絞り込みランダム）
+  // Custom Quiz
   const startCustomQuiz = () => {
     if (!customBatch && !customCategory) {
       alert("回数またはカテゴリを指定してください");
@@ -515,7 +521,6 @@ export default function App() {
 
     let targets = [...allQuestions];
 
-    // バッチ番号で絞り込み
     if (customBatch) {
       targets = targets.filter(q => {
         if (!q.displayId) return false;
@@ -524,7 +529,6 @@ export default function App() {
       });
     }
 
-    // カテゴリで絞り込み
     if (customCategory) {
       targets = targets.filter(q => q.category === customCategory);
     }
@@ -534,15 +538,16 @@ export default function App() {
       return;
     }
 
-    // ランダムシャッフルして開始
-    setQuestions(shuffleArray(targets));
+    const finalQuestions = shuffleArray(targets);
+    setQuestions(finalQuestions);
     setCurrentQuestionIndex(0);
     resetQuestionState();
+    setSessionStats({ correct: 0, total: finalQuestions.length }); // ★リセット
     setMode('custom');
     setView('quiz');
   };
 
-  // Search (ID指定)
+  // Search
   const handleSearchQuiz = () => {
     if (!searchId) return;
     const target = allQuestions.find(q => q.displayId === searchId);
@@ -554,6 +559,7 @@ export default function App() {
     setQuestions([target]); 
     setCurrentQuestionIndex(0);
     resetQuestionState();
+    setSessionStats({ correct: 0, total: 1 }); // ★リセット
     setView('quiz');
   };
 
@@ -596,6 +602,11 @@ export default function App() {
       } else {
         isCorrect = false;
       }
+    }
+
+    // ★ スコア更新
+    if (isCorrect) {
+        setSessionStats(prev => ({ ...prev, correct: prev.correct + 1 }));
     }
 
     if (user) {
@@ -643,7 +654,7 @@ export default function App() {
       setCurrentQuestionIndex(prev => prev + 1);
       resetQuestionState();
     } else {
-      setView('dashboard');
+      setView('result'); // ★ 結果画面へ
     }
   };
 
@@ -668,16 +679,13 @@ export default function App() {
       setImportStatus("削除中...");
       const qRef = collection(db, 'artifacts', appId, 'public', 'data', 'questions');
       const snapshot = await getDocs(qRef);
-      
       const chunkSize = 500;
       const docs = snapshot.docs;
-      
       for (let i = 0; i < docs.length; i += chunkSize) {
         const batch = writeBatch(db);
         docs.slice(i, i + chunkSize).forEach(doc => batch.delete(doc.ref));
         await batch.commit();
       }
-      
       setAllQuestions([]);
       setQuestions([]);
       setImportStatus("全件削除完了");
@@ -951,6 +959,39 @@ export default function App() {
             </div>
           )}
         </main>
+      </div>
+    );
+  }
+
+  if (view === 'result') {
+    const correctRate = Math.round((sessionStats.correct / sessionStats.total) * 100) || 0;
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+        <div className="bg-white p-8 rounded-3xl shadow-xl w-full max-w-md text-center space-y-8">
+          <div className="bg-blue-100 w-20 h-20 rounded-full flex items-center justify-center mx-auto">
+            <Award className="text-blue-600 w-10 h-10" />
+          </div>
+          
+          <div>
+            <h2 className="text-2xl font-bold text-gray-800 mb-2">演習完了！</h2>
+            <p className="text-gray-500">お疲れ様でした。今回の結果です。</p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4 bg-gray-50 p-6 rounded-2xl">
+            <div>
+              <p className="text-sm text-gray-500 font-bold mb-1">正解数</p>
+              <p className="text-3xl font-bold text-gray-800">{sessionStats.correct} <span className="text-sm text-gray-400">/ {sessionStats.total}</span></p>
+            </div>
+            <div>
+              <p className="text-sm text-gray-500 font-bold mb-1">正答率</p>
+              <p className="text-3xl font-bold text-blue-600">{correctRate}%</p>
+            </div>
+          </div>
+
+          <Button onClick={() => setView('dashboard')} size="large" className="w-full">
+            <Home size={20} /> ダッシュボードへ戻る
+          </Button>
+        </div>
       </div>
     );
   }
