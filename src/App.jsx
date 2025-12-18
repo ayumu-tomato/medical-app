@@ -44,7 +44,10 @@ import {
  Filter,
  Award,
  Home,
- GraduationCap
+ GraduationCap,
+ Image as ImageIcon,
+ Maximize2,
+ X
 } from 'lucide-react';
 
 
@@ -156,10 +159,11 @@ const INITIAL_QUESTIONS = [
    displayId: '1_1',
    type: 'single',
    category: 'サンプル',
-   questionText: 'これはサンプル問題です。選択肢1が正解です。',
+   questionText: 'これはサンプル問題です。画像はありませんが、CSVでimageUrl列にURLを入れると表示されます。',
+   imageUrl: '', // 画像URLがあればここに設定
    options: ['選択肢1', '選択肢2', '選択肢3', '選択肢4', '選択肢5'],
    correctAnswer: '選択肢1',
-   explanation: 'これはサンプル解説です。管理画面からCSVをインポートしてください。'
+   explanation: 'これはサンプル解説です。'
  }
 ];
 
@@ -248,7 +252,8 @@ export default function App() {
  // Quiz State
  const [isUnsure, setIsUnsure] = useState(false);
  const [sessionStats, setSessionStats] = useState({ correct: 0, total: 0 });
- const [prevAttempt, setPrevAttempt] = useState(null); // 前回の成績保持用
+ const [prevAttempt, setPrevAttempt] = useState(null);
+ const [imageModalUrl, setImageModalUrl] = useState(null); // ★ 画像拡大用
 
 
  // Custom Quiz State
@@ -262,7 +267,7 @@ export default function App() {
 
  // Admin State
  const [newQ, setNewQ] = useState({
-   type: 'single', category: '', questionText: '', options: ['', '', '', '', ''], correctAnswerInput: '', explanation: ''
+   type: 'single', category: '', questionText: '', imageUrl: '', options: ['', '', '', '', ''], correctAnswerInput: '', explanation: ''
  });
  const [adminSelectedIndices, setAdminSelectedIndices] = useState([]);
  const [deleteRange, setDeleteRange] = useState({ batch: '', start: '', end: '' });
@@ -410,10 +415,10 @@ export default function App() {
 
  // --- CSV Import ---
  const downloadTemplate = () => {
-   const headers = "type,category,questionText,correctAnswer,option1,option2,option3,option4,option5,explanation";
-   const example1 = 'single,循環器,"MRの聴診所見は？",全収縮期雑音,拡張期ランブル,収縮期駆出性雑音,全収縮期雑音,連続性雑音,拡張早期灌水様雑音,"解説文です"';
-   const example2 = 'input,内分泌,"バセドウ病の抗体は？(4文字)",TRAb|TSH受容体抗体,,,,,,,"解説文です"';
-   const csvContent = "\uFEFF" + [headers, example1, example2].join("\n");
+   // ★ テンプレートに imageUrl を追加
+   const headers = "type,category,questionText,correctAnswer,imageUrl,option1,option2,option3,option4,option5,explanation";
+   const example1 = 'single,循環器,"MRの聴診所見は？",全収縮期雑音,"https://example.com/image.jpg",拡張期ランブル,収縮期駆出性雑音,全収縮期雑音,連続性雑音,拡張早期灌水様雑音,"解説文です"';
+   const csvContent = "\uFEFF" + [headers, example1].join("\n");
    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
    const url = URL.createObjectURL(blob);
    const link = document.createElement('a');
@@ -466,7 +471,10 @@ export default function App() {
          if (cols.length < 4) continue;
 
 
-         const [type, category, questionText, correctAnswerRaw, ...rest] = cols;
+         // ★ imageUrl を読み込むように変更
+         const [type, category, questionText, correctAnswerRaw, imageUrl, ...rest] = cols;
+        
+         // 後ろから解説を取り出す
          const explanation = rest.pop() || '';
          const options = rest.filter(o => o && o.trim() !== '');
 
@@ -483,6 +491,7 @@ export default function App() {
            type: type.trim(),
            category: category.trim(),
            questionText: questionText.trim(),
+           imageUrl: imageUrl ? imageUrl.trim() : '', // ★
            options: type === 'input' ? [] : options,
            correctAnswer,
            explanation: explanation.trim(),
@@ -652,7 +661,8 @@ export default function App() {
    setTextInput('');
    setShowExplanation(false);
    setIsUnsure(false);
-   setPrevAttempt(null); // ★ リセット
+   setPrevAttempt(null);
+   setImageModalUrl(null); // 画像モーダルリセット
  };
 
 
@@ -699,7 +709,6 @@ export default function App() {
 
 
    if (user) {
-     // ★ ここで更新前の履歴を退避
      const prevHistory = userHistory[currentQ.id] || {};
      setPrevAttempt(prevHistory.timestamp ? prevHistory : null);
 
@@ -867,6 +876,8 @@ export default function App() {
      type: newQ.type,
      category: newQ.category,
      questionText: newQ.questionText,
+     // ★ 手動追加にも画像URLを追加
+     imageUrl: newQ.imageUrl || '',
      options: newQ.type === 'input' ? [] : cleanOptions,
      correctAnswer: finalCorrectAnswer,
      explanation: newQ.explanation,
@@ -881,7 +892,7 @@ export default function App() {
      setAllQuestions([...allQuestions, added]);
      setQuestions([...allQuestions, added]);
      alert('追加しました');
-     setNewQ({ type: 'single', category: '', questionText: '', options: ['', '', '', '', ''], correctAnswerInput: '', explanation: '' });
+     setNewQ({ type: 'single', category: '', questionText: '', imageUrl: '', options: ['', '', '', '', ''], correctAnswerInput: '', explanation: '' });
      setAdminSelectedIndices([]);
    } catch (e) { alert(e.message); }
  };
@@ -1213,6 +1224,66 @@ export default function App() {
          </div>
 
 
+         {/* Manual Create */}
+         <div className="bg-white rounded-3xl shadow-sm p-6 space-y-6">
+           <h2 className="font-bold text-gray-800 border-b pb-2">手動で1問追加</h2>
+           <div className="grid grid-cols-2 gap-4">
+             <div>
+               <label className="block text-sm font-bold text-gray-700 mb-2">タイプ</label>
+               <select className="w-full p-3 rounded-xl border-2 border-gray-200 bg-white" value={newQ.type} onChange={(e) => {setNewQ({...newQ, type: e.target.value}); setAdminSelectedIndices([]);}}>
+                 <option value="single">単一選択 (5択)</option>
+                 <option value="multi">複数選択</option>
+                 <option value="input">記述/穴埋め</option>
+               </select>
+             </div>
+             <div>
+               <label className="block text-sm font-bold text-gray-700 mb-2">カテゴリ</label>
+               <Input value={newQ.category} onChange={(e) => setNewQ({...newQ, category: e.target.value})} placeholder="例: 循環器" />
+             </div>
+           </div>
+           <div>
+             <label className="block text-sm font-bold text-gray-700 mb-2">問題文</label>
+             <textarea className="w-full p-3 rounded-xl border-2 border-gray-200 h-24 outline-none focus:ring-2 focus:ring-blue-500" placeholder="問題文..." value={newQ.questionText} onChange={(e) => setNewQ({...newQ, questionText: e.target.value})} />
+           </div>
+          
+           {/* ★ 画像URL入力欄 */}
+           <div>
+             <label className="block text-sm font-bold text-gray-700 mb-2">画像URL (任意)</label>
+             <Input value={newQ.imageUrl} onChange={(e) => setNewQ({...newQ, imageUrl: e.target.value})} placeholder="https://..." />
+           </div>
+
+
+           {newQ.type !== 'input' && (
+             <div className="space-y-3">
+               <label className="block text-sm font-bold text-gray-700">選択肢 <span className="text-xs font-normal text-red-500 ml-2">※正解をクリック</span></label>
+               {newQ.options.map((opt, idx) => (
+                 <div key={idx} className="flex items-center gap-3">
+                   <button onClick={() => {
+                       if(newQ.type === 'single') setAdminSelectedIndices([idx]);
+                       else {
+                         if(adminSelectedIndices.includes(idx)) setAdminSelectedIndices(adminSelectedIndices.filter(i=>i!==idx));
+                         else setAdminSelectedIndices([...adminSelectedIndices, idx]);
+                       }
+                     }}
+                     className={`w-8 h-8 rounded-full border-2 flex items-center justify-center flex-shrink-0 ${adminSelectedIndices.includes(idx) ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-gray-300 text-gray-300'}`}>
+                     <CheckCircle size={16} />
+                   </button>
+                   <Input value={opt} onChange={(e) => {const newOpts = [...newQ.options]; newOpts[idx] = e.target.value; setNewQ({...newQ, options: newOpts});}} placeholder={`選択肢 ${idx + 1}`} />
+                 </div>
+               ))}
+             </div>
+           )}
+           {newQ.type === 'input' && (
+             <div><label className="block text-sm font-bold text-gray-700 mb-2">正解</label><Input value={newQ.correctAnswerInput} onChange={(e) => setNewQ({...newQ, correctAnswerInput: e.target.value})} placeholder="例: TRAb" /></div>
+           )}
+           <div>
+             <label className="block text-sm font-bold text-gray-700 mb-2">解説</label>
+             <textarea className="w-full p-3 rounded-xl border-2 border-gray-200 h-24 outline-none focus:ring-2 focus:ring-blue-500" placeholder="解説..." value={newQ.explanation} onChange={(e) => setNewQ({...newQ, explanation: e.target.value})} />
+           </div>
+           <Button onClick={handleCreateQuestion} className="w-full mt-4"><Save size={20} /> 保存して追加</Button>
+         </div>
+
+
          {/* Question List */}
          <div className="bg-white rounded-3xl shadow-sm p-6 space-y-4">
             <h2 className="font-bold text-gray-800 flex items-center gap-2 border-b pb-4">
@@ -1331,6 +1402,25 @@ export default function App() {
              </span>
            </div>
            <h2 className="text-xl font-bold text-gray-900 leading-relaxed mb-8">{currentQ.questionText}</h2>
+          
+           {/* ★ 画像表示エリア */}
+           {currentQ.imageUrl && (
+             <div className="mb-6 flex justify-center">
+               <div
+                 className="relative group cursor-zoom-in"
+                 onClick={() => setImageModalUrl(currentQ.imageUrl)}
+               >
+                 <img
+                   src={currentQ.imageUrl}
+                   alt="Question Image"
+                   className="max-h-64 rounded-xl shadow-md border border-gray-100 object-contain bg-gray-50"
+                 />
+                 <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors rounded-xl flex items-center justify-center">
+                   <Maximize2 className="text-white opacity-0 group-hover:opacity-100 drop-shadow-md" size={32}/>
+                 </div>
+               </div>
+             </div>
+           )}
 
 
            <div className="space-y-3">
@@ -1488,6 +1578,30 @@ export default function App() {
          )}
        </div>
      </div>
+
+
+     {/* ★ 画像拡大モーダル */}
+     {imageModalUrl && (
+       <div
+         className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4 animate-in fade-in duration-200"
+         onClick={() => setImageModalUrl(null)}
+       >
+         <div className="relative max-w-4xl max-h-full">
+           <button
+             onClick={() => setImageModalUrl(null)}
+             className="absolute -top-12 right-0 text-white hover:text-gray-300 p-2"
+           >
+             <X size={32} />
+           </button>
+           <img
+             src={imageModalUrl}
+             alt="Expanded"
+             className="max-w-full max-h-[85vh] object-contain rounded-lg shadow-2xl"
+             onClick={(e) => e.stopPropagation()}
+           />
+         </div>
+       </div>
+     )}
    </div>
  );
 }
