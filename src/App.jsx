@@ -43,11 +43,18 @@ import {
   History,
   Filter,
   Award,
-  Home
+  Home,
+  GraduationCap
 } from 'lucide-react';
 
 // --- Configuration ---
 const ADMIN_EMAIL = "2004ayumu0417@gmail.com"; // 管理者メールアドレス
+
+// コース定義
+const COURSES = [
+  { id: 'med-study-app', name: '試験対策' },
+  { id: 'cbt-prep-app', name: 'CBT対策' },
+];
 
 // --- Firebase Configuration (設定エリア) ---
 // 【重要】Firebaseコンソールからコピーした内容で、以下の { ... } の中身を書き換えてください。
@@ -74,8 +81,6 @@ try {
   console.error("Firebase Init Error:", e);
   initError = e.message;
 }
-
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'med-study-app';
 
 // --- Helper: String Normalizer ---
 const normalizeString = (str) => {
@@ -141,11 +146,11 @@ const INITIAL_QUESTIONS = [
     id: 'q1',
     displayId: '1_1',
     type: 'single',
-    category: '循環器',
-    questionText: '僧帽弁閉鎖不全症(MR)の聴診所見として最も適切なものはどれか。',
-    options: ['拡張期ランブル', '収縮期駆出性雑音', '全収縮期雑音', '連続性雑音', '拡張早期灌水様雑音'],
-    correctAnswer: '全収縮期雑音',
-    explanation: '僧帽弁閉鎖不全症(MR)では、左室から左房への逆流が生じるため、全収縮期雑音が心尖部で聴取される。'
+    category: 'サンプル',
+    questionText: 'これはサンプル問題です。選択肢1が正解です。',
+    options: ['選択肢1', '選択肢2', '選択肢3', '選択肢4', '選択肢5'],
+    correctAnswer: '選択肢1',
+    explanation: 'これはサンプル解説です。管理画面からCSVをインポートしてください。'
   }
 ];
 
@@ -211,9 +216,13 @@ export default function App() {
   const [userHistory, setUserHistory] = useState({});
   const [importStatus, setImportStatus] = useState('');
   
+  // ★ Current App ID (Course Selection)
+  const [currentAppId, setCurrentAppId] = useState(COURSES[0].id);
+
   // Quiz State
   const [isUnsure, setIsUnsure] = useState(false);
-  const [sessionStats, setSessionStats] = useState({ correct: 0, total: 0 }); // ★ セッションスコア
+  const [sessionStats, setSessionStats] = useState({ correct: 0, total: 0 }); 
+  const [prevAttempt, setPrevAttempt] = useState(null); // ★ 前回の成績保持用
 
   // Custom Quiz State
   const [customBatch, setCustomBatch] = useState('');
@@ -246,7 +255,7 @@ export default function App() {
     return shuffleArray(currentQ.options);
   }, [currentQ]);
 
-  // 正解データの正規化（数字指定をテキストに変換）
+  // 正解データの正規化
   const normalizedCorrectAnswers = useMemo(() => {
     if (!currentQ) return [];
     
@@ -279,7 +288,7 @@ export default function App() {
     };
   }, [currentQ, userHistory]);
 
-  // カテゴリリストの生成（全問題から抽出）
+  // カテゴリリスト
   const categories = useMemo(() => {
     const cats = allQuestions.map(q => q.category).filter(c => c && c.trim() !== '');
     return [...new Set(cats)].sort();
@@ -299,7 +308,6 @@ export default function App() {
       setLoading(false);
       if (u) {
         setView('dashboard');
-        loadUserData(u.uid);
       } else {
         setView('auth');
       }
@@ -307,16 +315,29 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
+  // ★ コース切り替え時やログイン時にデータをロード
+  useEffect(() => {
+    if (user && !initError) {
+      loadUserData(user.uid, currentAppId);
+    }
+  }, [user, currentAppId]);
+
   // --- Data Loading ---
-  const loadUserData = async (uid) => {
+  const loadUserData = async (uid, targetAppId) => {
     if (initError) return;
     try {
-      const qRef = collection(db, 'artifacts', appId, 'public', 'data', 'questions');
+      // データのクリア
+      setAllQuestions([]);
+      setQuestions([]);
+      
+      const qRef = collection(db, 'artifacts', targetAppId, 'public', 'data', 'questions');
       const qSnap = await getDocs(qRef);
       let loadedQuestions = [];
+      
       if (qSnap.empty) {
+        // Initial Seed
         const seedPromises = INITIAL_QUESTIONS.map(q => 
-          setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'questions', q.id), q)
+          setDoc(doc(db, 'artifacts', targetAppId, 'public', 'data', 'questions', q.id), q)
         );
         await Promise.all(seedPromises);
         loadedQuestions = INITIAL_QUESTIONS;
@@ -324,6 +345,7 @@ export default function App() {
         loadedQuestions = qSnap.docs.map(doc => ({...doc.data(), id: doc.id}));
       }
       
+      // displayId (n_m) 順にソート
       loadedQuestions.sort((a, b) => {
         if (a.displayId && b.displayId) {
            const [aBatch, aNum] = a.displayId.split('_').map(Number);
@@ -337,7 +359,7 @@ export default function App() {
       setAllQuestions(loadedQuestions);
       setQuestions(loadedQuestions);
 
-      const historyRef = collection(db, 'artifacts', appId, 'users', uid, 'history');
+      const historyRef = collection(db, 'artifacts', targetAppId, 'users', uid, 'history');
       const historySnap = await getDocs(historyRef);
       const historyData = {};
       historySnap.forEach(doc => historyData[doc.id] = doc.data());
@@ -433,14 +455,14 @@ export default function App() {
           const chunk = newQuestions.slice(i, i + chunkSize);
           const batch = writeBatch(db);
           chunk.forEach(q => {
-            const docRef = doc(collection(db, 'artifacts', appId, 'public', 'data', 'questions'));
+            const docRef = doc(collection(db, 'artifacts', currentAppId, 'public', 'data', 'questions'));
             batch.set(docRef, q);
           });
           await batch.commit();
         }
 
         setImportStatus(`完了！ ${newQuestions.length}件追加しました。(ID: ${uploadBatchNum}_1 〜)`);
-        loadUserData(user.uid);
+        loadUserData(user.uid, currentAppId);
         setTimeout(() => setImportStatus(''), 3000);
 
       } catch (error) {
@@ -508,11 +530,10 @@ export default function App() {
     setQuestions(targetQuestions);
     setCurrentQuestionIndex(0);
     resetQuestionState();
-    setSessionStats({ correct: 0, total: targetQuestions.length }); // ★リセット
+    setSessionStats({ correct: 0, total: targetQuestions.length });
     setView('quiz');
   };
 
-  // Custom Quiz
   const startCustomQuiz = () => {
     if (!customBatch && !customCategory) {
       alert("回数またはカテゴリを指定してください");
@@ -542,12 +563,11 @@ export default function App() {
     setQuestions(finalQuestions);
     setCurrentQuestionIndex(0);
     resetQuestionState();
-    setSessionStats({ correct: 0, total: finalQuestions.length }); // ★リセット
+    setSessionStats({ correct: 0, total: finalQuestions.length }); 
     setMode('custom');
     setView('quiz');
   };
 
-  // Search
   const handleSearchQuiz = () => {
     if (!searchId) return;
     const target = allQuestions.find(q => q.displayId === searchId);
@@ -559,7 +579,7 @@ export default function App() {
     setQuestions([target]); 
     setCurrentQuestionIndex(0);
     resetQuestionState();
-    setSessionStats({ correct: 0, total: 1 }); // ★リセット
+    setSessionStats({ correct: 0, total: 1 });
     setView('quiz');
   };
 
@@ -568,6 +588,7 @@ export default function App() {
     setTextInput('');
     setShowExplanation(false);
     setIsUnsure(false);
+    setPrevAttempt(null); // ★ リセット
   };
 
   const handleOptionSelect = (option) => {
@@ -604,13 +625,15 @@ export default function App() {
       }
     }
 
-    // ★ スコア更新
     if (isCorrect) {
         setSessionStats(prev => ({ ...prev, correct: prev.correct + 1 }));
     }
 
     if (user) {
+      // ★ ここで更新前の履歴を退避
       const prevHistory = userHistory[currentQ.id] || {};
+      setPrevAttempt(prevHistory.timestamp ? prevHistory : null);
+
       const currentWrongCount = prevHistory.wrongCount || 0;
       const currentAttemptCount = prevHistory.attemptCount || 0;
 
@@ -628,7 +651,7 @@ export default function App() {
       };
       
       setUserHistory(prev => ({ ...prev, [currentQ.id]: resultData }));
-      await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'history', currentQ.id), resultData);
+      await setDoc(doc(db, 'artifacts', currentAppId, 'users', user.uid, 'history', currentQ.id), resultData);
     }
     setShowExplanation(true);
   };
@@ -644,7 +667,7 @@ export default function App() {
     };
     setUserHistory(prev => ({ ...prev, [currentQ.id]: updatedHistory }));
     
-    await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'history', currentQ.id), {
+    await updateDoc(doc(db, 'artifacts', currentAppId, 'users', user.uid, 'history', currentQ.id), {
       isUnsure: newUnsureStatus
     });
   };
@@ -654,7 +677,7 @@ export default function App() {
       setCurrentQuestionIndex(prev => prev + 1);
       resetQuestionState();
     } else {
-      setView('result'); // ★ 結果画面へ
+      setView('result'); 
     }
   };
 
@@ -662,7 +685,7 @@ export default function App() {
   const handleDeleteQuestion = async (id) => {
     if (!confirm("本当にこの問題を削除しますか？")) return;
     try {
-      await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'questions', id));
+      await deleteDoc(doc(db, 'artifacts', currentAppId, 'public', 'data', 'questions', id));
       const newAll = allQuestions.filter(q => q.id !== id);
       setAllQuestions(newAll);
       setQuestions(newAll);
@@ -672,12 +695,12 @@ export default function App() {
   };
 
   const handleDeleteAll = async () => {
-    if (!confirm("【警告】すべての問題を削除しますか？この操作は取り消せません。")) return;
+    if (!confirm(`【警告】「${COURSES.find(c=>c.id===currentAppId).name}」の問題を全て削除しますか？`)) return;
     if (!confirm("本当に本当によろしいですか？")) return;
     
     try {
       setImportStatus("削除中...");
-      const qRef = collection(db, 'artifacts', appId, 'public', 'data', 'questions');
+      const qRef = collection(db, 'artifacts', currentAppId, 'public', 'data', 'questions');
       const snapshot = await getDocs(qRef);
       const chunkSize = 500;
       const docs = snapshot.docs;
@@ -725,7 +748,7 @@ export default function App() {
       for (let i = 0; i < targets.length; i += chunkSize) {
         const batch = writeBatch(db);
         targets.slice(i, i + chunkSize).forEach(q => {
-          const ref = doc(db, 'artifacts', appId, 'public', 'data', 'questions', q.id);
+          const ref = doc(db, 'artifacts', currentAppId, 'public', 'data', 'questions', q.id);
           batch.delete(ref);
         });
         await batch.commit();
@@ -769,7 +792,7 @@ export default function App() {
     };
 
     try {
-      const docRef = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'questions'), newQuestionData);
+      const docRef = await addDoc(collection(db, 'artifacts', currentAppId, 'public', 'data', 'questions'), newQuestionData);
       const added = { ...newQuestionData, id: docRef.id };
       setAllQuestions([...allQuestions, added]);
       setQuestions([...allQuestions, added]);
@@ -840,9 +863,21 @@ export default function App() {
     return (
       <div className="min-h-screen bg-gray-50 pb-32">
         <header className="bg-white shadow-sm px-6 py-4 flex justify-between items-center sticky top-0 z-20 safe-area-top">
-          <h1 className="text-xl font-bold text-gray-800 flex items-center gap-2">
-            <Activity className="text-blue-600 fill-blue-600" /> MediPass
-          </h1>
+          
+          {/* ★ 左上：コース切替プルダウン */}
+          <div className="flex items-center gap-2">
+            <GraduationCap className="text-blue-600 w-6 h-6" />
+            <select 
+              value={currentAppId}
+              onChange={(e) => setCurrentAppId(e.target.value)}
+              className="text-lg font-bold text-gray-800 bg-transparent border-none outline-none cursor-pointer focus:ring-2 focus:ring-blue-200 rounded px-1"
+            >
+              {COURSES.map(course => (
+                <option key={course.id} value={course.id}>{course.name}</option>
+              ))}
+            </select>
+          </div>
+
           <button onClick={() => {signOut(auth); setView('auth');}} className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors">
             <LogOut size={24} />
           </button>
@@ -851,7 +886,7 @@ export default function App() {
         <main className="p-6 max-w-2xl mx-auto space-y-8">
           <div className="bg-gradient-to-br from-blue-600 to-indigo-700 rounded-3xl p-8 text-white shadow-xl shadow-blue-200">
             <h2 className="text-lg font-bold opacity-90 mb-6 flex items-center gap-2">
-              <Brain className="w-5 h-5"/> 学習状況
+              <Brain className="w-5 h-5"/> 学習状況 ({COURSES.find(c=>c.id===currentAppId).name})
             </h2>
             <div className="flex gap-12">
               <div>
@@ -1003,7 +1038,11 @@ export default function App() {
           <button onClick={() => setView('dashboard')} className="p-2 -ml-2 text-gray-500 hover:bg-gray-100 rounded-full">
             <ArrowLeft size={24} />
           </button>
-          <h1 className="text-xl font-bold text-gray-800">問題管理</h1>
+          {/* ★ ヘッダーにコース名表示 */}
+          <div>
+            <h1 className="text-xl font-bold text-gray-800">問題管理</h1>
+            <p className="text-xs text-blue-600 font-bold">{COURSES.find(c=>c.id===currentAppId).name} コース編集中</p>
+          </div>
         </header>
 
         <main className="p-6 max-w-2xl mx-auto pb-32 space-y-8">
@@ -1262,6 +1301,40 @@ export default function App() {
                 </button>
               )}
             </div>
+            
+            {/* ★★★ 追加：あなたの解答（今回） ★★★ */}
+            <div className="bg-white/60 rounded-xl p-4 mb-2">
+              <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">今回の解答</p>
+              <p className={`text-lg font-bold break-words ${isCorrectDisplay ? 'text-emerald-700' : 'text-red-600'}`}>
+                {currentQ.type === 'input' 
+                  ? (textInput || '(未入力)')
+                  : (selectedOptions.length > 0 ? selectedOptions.join(', ') : '(未選択)')
+                }
+              </p>
+            </div>
+
+            {/* ★★★ 追加：前回の解答 ★★★ */}
+            {prevAttempt && (
+              <div className="bg-gray-100/80 rounded-xl p-4 mb-2 border border-gray-200">
+                <div className="flex items-center gap-2 mb-1">
+                  <History size={14} className="text-gray-500"/>
+                  <p className="text-xs font-bold text-gray-500 uppercase tracking-wide">前回の結果</p>
+                </div>
+                <div className="flex items-center justify-between">
+                   <p className="text-sm font-bold text-gray-700 break-words">
+                     {Array.isArray(prevAttempt.lastAnswer) 
+                       ? prevAttempt.lastAnswer.join(', ') 
+                       : (prevAttempt.lastAnswer || '(記録なし)')}
+                   </p>
+                   <span className={`text-xs font-bold px-2 py-1 rounded ${prevAttempt.isCorrect ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-600'}`}>
+                     {prevAttempt.isCorrect ? '正解' : '不正解'}
+                   </span>
+                </div>
+                <p className="text-[10px] text-gray-400 mt-1 text-right">
+                  {new Date(prevAttempt.timestamp).toLocaleDateString()}
+                </p>
+              </div>
+            )}
             
             <div className="bg-white/60 rounded-xl p-4 mb-4">
               <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">正解</p>
