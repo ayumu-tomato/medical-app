@@ -53,10 +53,11 @@ import {
 // --- Configuration ---
 const ADMIN_EMAIL = "2004ayumu0417@gmail.com"; // 管理者メールアドレス
 
-// コース定義
+// ★ コース定義の変更
 const COURSES = [
   { id: 'med-study-app', name: '試験対策' },
-  { id: 'cbt-prep-app', name: 'CBT対策' },
+  { id: 'cbt-basic-app', name: 'CBT対策_基礎' },
+  { id: 'cbt-clinical-app', name: 'CBT対策_臨床' },
 ];
 
 // --- Firebase Configuration (設定エリア) ---
@@ -223,6 +224,7 @@ export default function App() {
   // ★ Current App ID (Course Selection) with Persistence
   const [currentAppId, setCurrentAppId] = useState(() => {
     const saved = localStorage.getItem('med-app-course-id');
+    // 保存されたIDが現在のコース一覧に存在するかチェック
     if (saved && COURSES.some(c => c.id === saved)) {
       return saved;
     }
@@ -257,7 +259,7 @@ export default function App() {
   // Quiz Hooks
   const currentQ = questions[currentQuestionIndex];
   const isLastQuestion = questions.length > 0 && currentQuestionIndex === questions.length - 1;
-  const isReviewMode = mode === 'review';
+  const isReviewMode = mode === 'review' || mode === 'custom-review'; // カスタム復習も含める
   const canCheck = currentQ 
     ? (currentQ.type === 'input' ? textInput.length > 0 : selectedOptions.length > 0)
     : false;
@@ -341,6 +343,7 @@ export default function App() {
   const loadUserData = async (uid, targetAppId) => {
     if (initError) return;
     try {
+      // データのクリア
       setAllQuestions([]);
       setQuestions([]);
       
@@ -548,7 +551,8 @@ export default function App() {
     setView('quiz');
   };
 
-  const startCustomQuiz = () => {
+  // ★ 改修：isReview フラグを受け取る
+  const startCustomQuiz = (isReview = false) => {
     if (!customBatch && !customCategory) {
       alert("回数またはカテゴリを指定してください");
       return;
@@ -568,17 +572,38 @@ export default function App() {
       targets = targets.filter(q => q.category === customCategory);
     }
 
+    // ★ 復習モードの場合の絞り込み
+    if (isReview) {
+        targets = targets.filter(q => {
+            const hist = userHistory[q.id];
+            if (!hist) return false; 
+            return hist.isCorrect === false || hist.isUnsure === true;
+        });
+        
+        // 復習モードならソート（苦手順）
+        targets.sort((a, b) => {
+            const histA = userHistory[a.id];
+            const histB = userHistory[b.id];
+            const rateA = (histA.attemptCount > 0) ? (histA.wrongCount / histA.attemptCount) : 0;
+            const rateB = (histB.attemptCount > 0) ? (histB.wrongCount / histB.attemptCount) : 0;
+            if (Math.abs(rateA - rateB) > 0.0001) return rateB - rateA;
+            return histB.wrongCount - histA.wrongCount;
+        });
+    } else {
+        // 通常はランダムシャッフル
+        targets = shuffleArray(targets);
+    }
+
     if (targets.length === 0) {
-      alert("条件に一致する問題がありません");
+      alert(isReview ? "条件に一致する復習対象の問題がありません" : "条件に一致する問題がありません");
       return;
     }
 
-    const finalQuestions = shuffleArray(targets);
-    setQuestions(finalQuestions);
+    setQuestions(targets);
     setCurrentQuestionIndex(0);
     resetQuestionState();
-    setSessionStats({ correct: 0, total: finalQuestions.length }); 
-    setMode('custom');
+    setSessionStats({ correct: 0, total: targets.length }); 
+    setMode(isReview ? 'custom-review' : 'custom'); // ★モード分け
     setView('quiz');
   };
 
@@ -872,8 +897,7 @@ export default function App() {
   }
 
   if (view === 'dashboard') {
-    // ★ 修正: 削除された問題を除外して集計する
-    // allQuestionsに含まれるIDの履歴のみを有効とする
+    // 削除された問題を除外して集計
     const validQuestionIds = new Set(allQuestions.map(q => q.id));
     
     const validHistory = Object.entries(userHistory)
@@ -955,9 +979,15 @@ export default function App() {
               </div>
             </div>
             
-            <Button onClick={startCustomQuiz} variant="outline" className="w-full border-blue-500 text-blue-600 hover:bg-blue-50">
-              指定条件でランダム演習
-            </Button>
+            {/* ★ ボタンを横並びに2つ配置 */}
+            <div className="flex gap-2">
+              <Button onClick={() => startCustomQuiz(false)} variant="outline" className="flex-1 border-blue-500 text-blue-600 hover:bg-blue-50 text-sm">
+                ランダム演習
+              </Button>
+              <Button onClick={() => startCustomQuiz(true)} variant="warning" className="flex-1 text-sm bg-amber-500 text-white hover:bg-amber-600 border-none shadow-amber-200">
+                復習
+              </Button>
+            </div>
           </div>
 
           {/* ID検索エリア */}
