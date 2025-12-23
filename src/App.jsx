@@ -47,13 +47,15 @@ import {
   GraduationCap,
   Image as ImageIcon,
   Maximize2,
-  X
+  X,
+  PieChart,
+  BarChart2
 } from 'lucide-react';
 
 // --- Configuration ---
 const ADMIN_EMAIL = "2004ayumu0417@gmail.com"; // 管理者メールアドレス
 
-// ★ コース定義の変更
+// コース定義
 const COURSES = [
   { id: 'med-study-app', name: '試験対策' },
   { id: 'cbt-basic-app', name: 'CBT対策_基礎' },
@@ -224,7 +226,6 @@ export default function App() {
   // ★ Current App ID (Course Selection) with Persistence
   const [currentAppId, setCurrentAppId] = useState(() => {
     const saved = localStorage.getItem('med-app-course-id');
-    // 保存されたIDが現在のコース一覧に存在するかチェック
     if (saved && COURSES.some(c => c.id === saved)) {
       return saved;
     }
@@ -248,6 +249,9 @@ export default function App() {
   // Search State
   const [searchId, setSearchId] = useState('');
 
+  // Stats View State
+  const [statsTab, setStatsTab] = useState('progress'); // 'progress' | 'accuracy'
+
   // Admin State
   const [newQ, setNewQ] = useState({
     type: 'single', category: '', questionText: '', imageUrl: '', options: ['', '', '', '', ''], correctAnswerInput: '', explanation: ''
@@ -259,7 +263,7 @@ export default function App() {
   // Quiz Hooks
   const currentQ = questions[currentQuestionIndex];
   const isLastQuestion = questions.length > 0 && currentQuestionIndex === questions.length - 1;
-  const isReviewMode = mode === 'review' || mode === 'custom-review'; // カスタム復習も含める
+  const isReviewMode = mode === 'review' || mode === 'custom-review';
   const canCheck = currentQ 
     ? (currentQ.type === 'input' ? textInput.length > 0 : selectedOptions.length > 0)
     : false;
@@ -310,6 +314,40 @@ export default function App() {
     const cats = allQuestions.map(q => q.category).filter(c => c && c.trim() !== '');
     return [...new Set(cats)].sort();
   }, [allQuestions]);
+
+  // ★ 詳細統計データの計算
+  const categoryStats = useMemo(() => {
+    if (allQuestions.length === 0) return [];
+
+    // カテゴリごとの集計箱を用意
+    const stats = {};
+    
+    allQuestions.forEach(q => {
+      const cat = q.category || '未分類';
+      if (!stats[cat]) {
+        stats[cat] = { total: 0, answered: 0, correct: 0 };
+      }
+      stats[cat].total += 1;
+      
+      const hist = userHistory[q.id];
+      if (hist && hist.attemptCount > 0) {
+        stats[cat].answered += 1;
+        // 最新が正解なら正解数にカウント
+        if (hist.isCorrect) {
+          stats[cat].correct += 1;
+        }
+      }
+    });
+
+    // 配列に変換して計算
+    return Object.entries(stats).map(([name, data]) => ({
+      name,
+      ...data,
+      progressRate: data.total > 0 ? Math.round((data.answered / data.total) * 100) : 0,
+      accuracyRate: data.answered > 0 ? Math.round((data.correct / data.answered) * 100) : 0
+    })).sort((a, b) => a.name.localeCompare(b.name));
+  }, [allQuestions, userHistory]);
+
 
   // --- Auth & Init ---
   useEffect(() => {
@@ -551,7 +589,7 @@ export default function App() {
     setView('quiz');
   };
 
-  // ★ 改修：isReview フラグを受け取る
+  // Custom Quiz
   const startCustomQuiz = (isReview = false) => {
     if (!customBatch && !customCategory) {
       alert("回数またはカテゴリを指定してください");
@@ -572,7 +610,6 @@ export default function App() {
       targets = targets.filter(q => q.category === customCategory);
     }
 
-    // ★ 復習モードの場合の絞り込み
     if (isReview) {
         targets = targets.filter(q => {
             const hist = userHistory[q.id];
@@ -580,7 +617,6 @@ export default function App() {
             return hist.isCorrect === false || hist.isUnsure === true;
         });
         
-        // 復習モードならソート（苦手順）
         targets.sort((a, b) => {
             const histA = userHistory[a.id];
             const histB = userHistory[b.id];
@@ -590,7 +626,6 @@ export default function App() {
             return histB.wrongCount - histA.wrongCount;
         });
     } else {
-        // 通常はランダムシャッフル
         targets = shuffleArray(targets);
     }
 
@@ -603,7 +638,7 @@ export default function App() {
     setCurrentQuestionIndex(0);
     resetQuestionState();
     setSessionStats({ correct: 0, total: targets.length }); 
-    setMode(isReview ? 'custom-review' : 'custom'); // ★モード分け
+    setMode(isReview ? 'custom-review' : 'custom'); 
     setView('quiz');
   };
 
@@ -945,6 +980,16 @@ export default function App() {
                 <p className="text-sm opacity-75 font-medium">要復習 (× / △)</p>
               </div>
             </div>
+            {/* ★ 詳細な学習状況ボタン */}
+            <div className="mt-6">
+              <Button 
+                onClick={() => setView('stats')} 
+                variant="outline" 
+                className="w-full border-white/30 text-white hover:bg-white/10 bg-white/10"
+              >
+                <BarChart2 size={18} /> 詳細な学習状況を確認
+              </Button>
+            </div>
           </div>
 
           {/* ★ カスタム演習（条件指定） */}
@@ -1046,6 +1091,81 @@ export default function App() {
               </button>
             </div>
           )}
+        </main>
+      </div>
+    );
+  }
+
+  // ★ 詳細統計画面
+  if (view === 'stats') {
+    return (
+      <div className="min-h-screen bg-gray-50 pb-20">
+        <header className="bg-white shadow-sm px-6 py-4 flex items-center sticky top-0 z-20 safe-area-top gap-4">
+          <button onClick={() => setView('dashboard')} className="p-2 -ml-2 text-gray-500 hover:bg-gray-100 rounded-full">
+            <ArrowLeft size={24} />
+          </button>
+          <h1 className="text-xl font-bold text-gray-800">詳細な学習状況</h1>
+        </header>
+
+        <main className="p-6 max-w-2xl mx-auto space-y-6">
+          {/* タブ切り替え */}
+          <div className="flex bg-gray-200 p-1 rounded-xl">
+            <button 
+              onClick={() => setStatsTab('progress')}
+              className={`flex-1 py-2 px-4 rounded-lg font-bold text-sm transition-all ${
+                statsTab === 'progress' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              演習割合
+            </button>
+            <button 
+              onClick={() => setStatsTab('accuracy')}
+              className={`flex-1 py-2 px-4 rounded-lg font-bold text-sm transition-all ${
+                statsTab === 'accuracy' ? 'bg-white text-emerald-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              正答率
+            </button>
+          </div>
+
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+            {categoryStats.length === 0 ? (
+              <div className="p-8 text-center text-gray-400">データがありません</div>
+            ) : (
+              <div className="divide-y divide-gray-100">
+                {categoryStats.map((stat) => (
+                  <div key={stat.name} className="p-4 hover:bg-gray-50 transition-colors">
+                    <div className="flex justify-between items-end mb-2">
+                      <h3 className="font-bold text-gray-800">{stat.name}</h3>
+                      <div className="text-right">
+                        {statsTab === 'progress' ? (
+                          <>
+                            <span className="text-xl font-bold text-blue-600">{stat.progressRate}%</span>
+                            <span className="text-xs text-gray-400 ml-1">({stat.answered}/{stat.total})</span>
+                          </>
+                        ) : (
+                          <>
+                            <span className="text-xl font-bold text-emerald-600">{stat.accuracyRate}%</span>
+                            <span className="text-xs text-gray-400 ml-1">({stat.correct}/{stat.answered})</span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                    
+                    {/* プログレスバー */}
+                    <div className="w-full bg-gray-100 rounded-full h-2.5 overflow-hidden">
+                      <div 
+                        className={`h-full rounded-full transition-all duration-500 ${
+                          statsTab === 'progress' ? 'bg-blue-500' : 'bg-emerald-500'
+                        }`}
+                        style={{ width: `${statsTab === 'progress' ? stat.progressRate : stat.accuracyRate}%` }}
+                      ></div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </main>
       </div>
     );
