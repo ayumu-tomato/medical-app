@@ -63,22 +63,32 @@ const COURSES = [
 ];
 
 // --- Firebase Configuration (設定エリア) ---
-// 【重要】Firebaseコンソールからコピーした内容で、以下の { ... } の中身を書き換えてください。
-const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
-  apiKey: "AIzaSyBUaylHYEZNXL2jqojtILTaU0RrunJ6Rq0",
-  authDomain: "medical-study-a0154.firebaseapp.com",
-  projectId: "medical-study-a0154",
-  storageBucket: "medical-study-a0154.firebasestorage.app",
-  messagingSenderId: "422680487740",
-  appId: "1:422680487740:web:c9872f633f53469d7e6039"
+
+// 【重要】GitHubに公開する際は、APIキーを直接書かずに「環境変数」を使うのが安全です。
+// パソコンで開発する際は、プロジェクトのルートに「.env」というファイルを作り、そこにキーを記述してください。
+
+// ▼ 環境変数を使う場合（推奨）は、以下のコメントアウトを外して、下の「直接記述」の方を削除してください。
+
+const firebaseConfig = {
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID
 };
+
+
+
 
 // アプリの初期化
 let app, auth, db;
 let initError = null;
 try {
+  // キーが設定されているか簡易チェック
   if (!firebaseConfig.apiKey || firebaseConfig.apiKey === "ここにあなたのAPIキー") {
-    console.warn("APIキーが設定されていません");
+     // 環境変数が読み込めていない、またはキーが未設定の場合の警告
+     console.warn("APIキーが正しく設定されていない可能性があります。");
   }
   app = initializeApp(firebaseConfig);
   auth = getAuth(app);
@@ -1281,64 +1291,6 @@ export default function App() {
                 <Trash2 size={20} /> 全ての問題を削除
               </Button>
             </div>
-          </div>
-
-          {/* Manual Create */}
-          <div className="bg-white rounded-3xl shadow-sm p-6 space-y-6">
-            <h2 className="font-bold text-gray-800 border-b pb-2">手動で1問追加</h2>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-bold text-gray-700 mb-2">タイプ</label>
-                <select className="w-full p-3 rounded-xl border-2 border-gray-200 bg-white" value={newQ.type} onChange={(e) => {setNewQ({...newQ, type: e.target.value}); setAdminSelectedIndices([]);}}>
-                  <option value="single">単一選択 (5択)</option>
-                  <option value="multi">複数選択</option>
-                  <option value="input">記述/穴埋め</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-bold text-gray-700 mb-2">カテゴリ</label>
-                <Input value={newQ.category} onChange={(e) => setNewQ({...newQ, category: e.target.value})} placeholder="例: 循環器" />
-              </div>
-            </div>
-            <div>
-              <label className="block text-sm font-bold text-gray-700 mb-2">問題文</label>
-              <textarea className="w-full p-3 rounded-xl border-2 border-gray-200 h-24 outline-none focus:ring-2 focus:ring-blue-500" placeholder="問題文..." value={newQ.questionText} onChange={(e) => setNewQ({...newQ, questionText: e.target.value})} />
-            </div>
-            
-            {/* ★ 画像URL入力欄 */}
-            <div>
-              <label className="block text-sm font-bold text-gray-700 mb-2">画像URL (任意)</label>
-              <Input value={newQ.imageUrl} onChange={(e) => setNewQ({...newQ, imageUrl: e.target.value})} placeholder="https://..." />
-            </div>
-
-            {newQ.type !== 'input' && (
-              <div className="space-y-3">
-                <label className="block text-sm font-bold text-gray-700">選択肢 <span className="text-xs font-normal text-red-500 ml-2">※正解をクリック</span></label>
-                {newQ.options.map((opt, idx) => (
-                  <div key={idx} className="flex items-center gap-3">
-                    <button onClick={() => {
-                        if(newQ.type === 'single') setAdminSelectedIndices([idx]);
-                        else {
-                          if(adminSelectedIndices.includes(idx)) setAdminSelectedIndices(adminSelectedIndices.filter(i=>i!==idx));
-                          else setAdminSelectedIndices([...adminSelectedIndices, idx]);
-                        }
-                      }} 
-                      className={`w-8 h-8 rounded-full border-2 flex items-center justify-center flex-shrink-0 ${adminSelectedIndices.includes(idx) ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-gray-300 text-gray-300'}`}>
-                      <CheckCircle size={16} />
-                    </button>
-                    <Input value={opt} onChange={(e) => {const newOpts = [...newQ.options]; newOpts[idx] = e.target.value; setNewQ({...newQ, options: newOpts});}} placeholder={`選択肢 ${idx + 1}`} />
-                  </div>
-                ))}
-              </div>
-            )}
-            {newQ.type === 'input' && (
-              <div><label className="block text-sm font-bold text-gray-700 mb-2">正解</label><Input value={newQ.correctAnswerInput} onChange={(e) => setNewQ({...newQ, correctAnswerInput: e.target.value})} placeholder="例: TRAb" /></div>
-            )}
-            <div>
-              <label className="block text-sm font-bold text-gray-700 mb-2">解説</label>
-              <textarea className="w-full p-3 rounded-xl border-2 border-gray-200 h-24 outline-none focus:ring-2 focus:ring-blue-500" placeholder="解説..." value={newQ.explanation} onChange={(e) => setNewQ({...newQ, explanation: e.target.value})} />
-            </div>
-            <Button onClick={handleCreateQuestion} className="w-full mt-4"><Save size={20} /> 保存して追加</Button>
           </div>
 
           {/* Question List */}
