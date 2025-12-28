@@ -64,18 +64,18 @@ const COURSES = [
 
 // --- Firebase Configuration (設定エリア) ---
 
-// 【重要】GitHubに公開する際は、APIキーを直接書かずに「環境変数」を使うのが安全です。
-// パソコンで開発する際は、プロジェクトのルートに「.env」というファイルを作り、そこにキーを記述してください。
+// 【
+// パソコンで開発する際は、プロジェクトのルートに「.env」というファイルを作り、そこに記述してください。
 
 // ▼ 環境変数を使う場合（推奨）は、以下のコメントアウトを外して、下の「直接記述」の方を削除してください。
 
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID
+ apiKey: "AIzaSyBUaylHYEZNXL2jqojtILTaU0RrunJ6Rq0",
+  authDomain: "medical-study-a0154.firebaseapp.com",
+  projectId: "medical-study-a0154",
+  storageBucket: "medical-study-a0154.firebasestorage.app",
+  messagingSenderId: "422680487740",
+  appId: "1:422680487740:web:c9872f633f53469d7e6039"
 };
 
 
@@ -1602,3 +1602,12 @@ export default function App() {
     </div>
   );
 }
+
+
+
+
+
+
+
+
+
