@@ -64,13 +64,13 @@ const COURSES = [
 
 // --- Firebase Configuration (設定エリア) ---
 
-// 【
-// パソコンで開発する際は、プロジェクトのルートに「.env」というファイルを作り、そこに記述してください。
+// 【重要】GitHubに公開する際は、APIキーを直接書かずに「環境変数」を使うのが安全です。
+// パソコンで開発する際は、プロジェクトのルートに「.env」というファイルを作り、そこにキーを記述してください。
 
 // ▼ 環境変数を使う場合（推奨）は、以下のコメントアウトを外して、下の「直接記述」の方を削除してください。
 
 const firebaseConfig = {
- apiKey: "AIzaSyBUaylHYEZNXL2jqojtILTaU0RrunJ6Rq0",
+  apiKey: "AIzaSyBUaylHYEZNXL2jqojtILTaU0RrunJ6Rq0",
   authDomain: "medical-study-a0154.firebaseapp.com",
   projectId: "medical-study-a0154",
   storageBucket: "medical-study-a0154.firebasestorage.app",
@@ -105,6 +105,21 @@ const normalizeString = (str) => {
     return String.fromCharCode(s.charCodeAt(0) - 0xFEE0);
   });
   return normalized.replace(/\s+/g, '').toLowerCase();
+};
+
+// --- Helper: Google Drive Link Converter ---
+// Google Driveの共有リンクを直リンクに変換する関数
+const convertToDirectLink = (url) => {
+  if (!url) return '';
+  // Google Driveのリンクか判定
+  if (url.includes('drive.google.com') || url.includes('docs.google.com')) {
+    // ファイルIDを抽出 (英数字、ハイフン、アンダースコアが25文字以上続く部分)
+    const idMatch = url.match(/[-\w]{25,}/);
+    if (idMatch) {
+      return `https://drive.google.com/uc?export=view&id=${idMatch[0]}`;
+    }
+  }
+  return url;
 };
 
 // --- Helper: CSV Parser ---
@@ -1295,7 +1310,7 @@ export default function App() {
 
           {/* Question List */}
           <div className="bg-white rounded-3xl shadow-sm p-6 space-y-4">
-             <h2 className="font-bold text-gray-800 flex items-center gap-2 border-b pb-4">
+              <h2 className="font-bold text-gray-800 flex items-center gap-2 border-b pb-4">
               <List className="text-gray-600" /> 登録済み問題 ({questions.length})
             </h2>
             <div className="space-y-3 max-h-[500px] overflow-y-auto pr-2">
@@ -1416,7 +1431,7 @@ export default function App() {
                   onClick={() => setImageModalUrl(currentQ.imageUrl)}
                 >
                   <img 
-                    src={currentQ.imageUrl} 
+                    src={convertToDirectLink(currentQ.imageUrl)} 
                     alt="Question Image" 
                     className="max-h-64 rounded-xl shadow-md border border-gray-100 object-contain bg-gray-50"
                   />
@@ -1523,14 +1538,14 @@ export default function App() {
                   <p className="text-xs font-bold text-gray-500 uppercase tracking-wide">前回の結果</p>
                 </div>
                 <div className="flex items-center justify-between">
-                   <p className="text-sm font-bold text-gray-700 break-words">
-                     {Array.isArray(prevAttempt.lastAnswer) 
-                       ? prevAttempt.lastAnswer.join(', ') 
-                       : (prevAttempt.lastAnswer || '(記録なし)')}
-                   </p>
-                   <span className={`text-xs font-bold px-2 py-1 rounded ${prevAttempt.isCorrect ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-600'}`}>
-                     {prevAttempt.isCorrect ? '正解' : '不正解'}
-                   </span>
+                    <p className="text-sm font-bold text-gray-700 break-words">
+                      {Array.isArray(prevAttempt.lastAnswer) 
+                        ? prevAttempt.lastAnswer.join(', ') 
+                        : (prevAttempt.lastAnswer || '(記録なし)')}
+                    </p>
+                    <span className={`text-xs font-bold px-2 py-1 rounded ${prevAttempt.isCorrect ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-600'}`}>
+                      {prevAttempt.isCorrect ? '正解' : '不正解'}
+                    </span>
                 </div>
                 <p className="text-[10px] text-gray-400 mt-1 text-right">
                   {new Date(prevAttempt.timestamp).toLocaleDateString()}
@@ -1591,7 +1606,7 @@ export default function App() {
               <X size={32} />
             </button>
             <img 
-              src={imageModalUrl} 
+              src={convertToDirectLink(imageModalUrl)} 
               alt="Expanded" 
               className="max-w-full max-h-[85vh] object-contain rounded-lg shadow-2xl"
               onClick={(e) => e.stopPropagation()} 
@@ -1602,12 +1617,3 @@ export default function App() {
     </div>
   );
 }
-
-
-
-
-
-
-
-
-
