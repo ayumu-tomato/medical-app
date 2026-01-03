@@ -107,16 +107,31 @@ const normalizeString = (str) => {
   return normalized.replace(/\s+/g, '').toLowerCase();
 };
 
-// --- Helper: Google Drive Link Converter ---
-// Google Driveの共有リンクを直リンクに変換する関数
+// --- Helper: Google Drive Link Converter (Fixed) ---
+// Google Driveの共有リンクを、より確実に表示できる形式に変換する関数
 const convertToDirectLink = (url) => {
   if (!url) return '';
-  // Google Driveのリンクか判定
+  
+  // Google DriveのURLかチェック
   if (url.includes('drive.google.com') || url.includes('docs.google.com')) {
-    // ファイルIDを抽出 (英数字、ハイフン、アンダースコアが25文字以上続く部分)
-    const idMatch = url.match(/[-\w]{25,}/);
-    if (idMatch) {
-      return `https://drive.google.com/uc?export=view&id=${idMatch[0]}`;
+    let id = null;
+    
+    // パターン1: /file/d/ID/view
+    const parts = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
+    if (parts && parts[1]) {
+      id = parts[1];
+    } else {
+      // パターン2: id=ID
+      const idMatch = url.match(/id=([a-zA-Z0-9_-]+)/);
+      if (idMatch && idMatch[1]) {
+        id = idMatch[1];
+      }
+    }
+
+    // IDが取得できたら、thumbnailエンドポイント（sz=w1000で高画質指定）を使用
+    // これが現在最も安定して直リンク表示できる方法です
+    if (id) {
+      return `https://drive.google.com/thumbnail?id=${id}&sz=w1000`;
     }
   }
   return url;
@@ -1423,7 +1438,7 @@ export default function App() {
             </div>
             <h2 className="text-xl font-bold text-gray-900 leading-relaxed mb-8">{currentQ.questionText}</h2>
             
-            {/* ★ 画像表示エリア */}
+            {/* ★ 画像表示エリア（修正済み） */}
             {currentQ.imageUrl && (
               <div className="mb-6 flex justify-center">
                 <div 
@@ -1433,6 +1448,7 @@ export default function App() {
                   <img 
                     src={convertToDirectLink(currentQ.imageUrl)} 
                     alt="Question Image" 
+                    referrerPolicy="no-referrer"
                     className="max-h-64 rounded-xl shadow-md border border-gray-100 object-contain bg-gray-50"
                   />
                   <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors rounded-xl flex items-center justify-center">
@@ -1592,7 +1608,7 @@ export default function App() {
         </div>
       </div>
 
-      {/* ★ 画像拡大モーダル */}
+      {/* ★ 画像拡大モーダル（修正済み） */}
       {imageModalUrl && (
         <div 
           className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4 animate-in fade-in duration-200"
@@ -1608,6 +1624,7 @@ export default function App() {
             <img 
               src={convertToDirectLink(imageModalUrl)} 
               alt="Expanded" 
+              referrerPolicy="no-referrer"
               className="max-w-full max-h-[85vh] object-contain rounded-lg shadow-2xl"
               onClick={(e) => e.stopPropagation()} 
             />
