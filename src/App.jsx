@@ -310,20 +310,27 @@ export default function App() {
   // ★ 修正: 安全にtypeを取得するヘルパー
   const getCurrentType = () => {
     if (!currentQ) return 'single';
-    return (currentQ.type || 'single').toLowerCase().trim();
+    // nullチェックと小文字化を徹底
+    const rawType = currentQ.type || 'single';
+    return rawType.toLowerCase().trim();
   };
   
+  // ★ 修正: canCheckのロジックを簡素化して確実にボタンが反応するようにする
   const canCheck = useMemo(() => {
     if (!currentQ) return false;
     const type = getCurrentType();
-    if (type === 'input') return textInput.length > 0;
-    return selectedOptions.length > 0;
+    
+    if (type.includes('input')) {
+      return textInput && textInput.trim().length > 0;
+    }
+    // single/multi問わず選択肢があればOK
+    return selectedOptions && selectedOptions.length > 0;
   }, [currentQ, textInput, selectedOptions]);
 
   // 選択肢シャッフル
   const currentOptions = useMemo(() => {
     const type = getCurrentType();
-    if (!currentQ || !Array.isArray(currentQ.options) || type === 'input') {
+    if (!currentQ || !Array.isArray(currentQ.options) || type.includes('input')) {
       return [];
     }
     return shuffleArray(currentQ.options);
@@ -725,7 +732,7 @@ export default function App() {
     const type = getCurrentType();
     
     // typeが 'input' でない限り、デフォルトでsingle扱い
-    if (type === 'multi') {
+    if (type.includes('multi')) {
       if (selectedOptions.includes(option)) {
         setSelectedOptions(selectedOptions.filter(o => o !== option));
       } else {
@@ -741,12 +748,12 @@ export default function App() {
     let isCorrect = false;
     const type = getCurrentType();
 
-    if (type === 'input') {
+    if (type.includes('input')) {
       const normalize = (str) => str.replace(/\s+/g, '').toLowerCase();
       const normalizedInput = normalizeString(textInput);
       const correctAnswers = currentQ.correctAnswer.split('|');
       isCorrect = correctAnswers.some(ans => normalizedInput === normalizeString(ans));
-    } else if (type === 'multi') {
+    } else if (type.includes('multi')) {
       const correctArr = normalizedCorrectAnswers;
       if (selectedOptions.length === correctArr.length) {
         isCorrect = selectedOptions.every(opt => 
@@ -778,7 +785,7 @@ export default function App() {
         ...prevHistory,
         isCorrect,
         timestamp: new Date().toISOString(),
-        lastAnswer: type === 'input' ? textInput : selectedOptions,
+        lastAnswer: type.includes('input') ? textInput : selectedOptions,
         wrongCount: newWrongCount,
         attemptCount: newAttemptCount,
         isUnsure: false 
@@ -1231,6 +1238,39 @@ export default function App() {
     );
   }
 
+  if (view === 'result') {
+    const correctRate = Math.round((sessionStats.correct / sessionStats.total) * 100) || 0;
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+        <div className="bg-white p-8 rounded-3xl shadow-xl w-full max-w-md text-center space-y-8">
+          <div className="bg-blue-100 w-20 h-20 rounded-full flex items-center justify-center mx-auto">
+            <Award className="text-blue-600 w-10 h-10" />
+          </div>
+          
+          <div>
+            <h2 className="text-2xl font-bold text-gray-800 mb-2">演習完了！</h2>
+            <p className="text-gray-500">お疲れ様でした。今回の結果です。</p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4 bg-gray-50 p-6 rounded-2xl">
+            <div>
+              <p className="text-sm text-gray-500 font-bold mb-1">正解数</p>
+              <p className="text-3xl font-bold text-gray-800">{sessionStats.correct} <span className="text-sm text-gray-400">/ {sessionStats.total}</span></p>
+            </div>
+            <div>
+              <p className="text-sm text-gray-500 font-bold mb-1">正答率</p>
+              <p className="text-3xl font-bold text-blue-600">{correctRate}%</p>
+            </div>
+          </div>
+
+          <Button onClick={() => setView('dashboard')} size="large" className="w-full">
+            <Home size={20} /> ダッシュボードへ戻る
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   if (view === 'admin') {
     return (
       <div className="min-h-screen bg-gray-50">
@@ -1425,14 +1465,14 @@ export default function App() {
   if (showExplanation && currentQ) {
     const type = getCurrentType();
     
-    if (type === 'input') {
+    if (type.includes('input')) {
       const normalize = (str) => str.replace(/\s+/g, '').toLowerCase();
       // 記述式の別解対応
       const normalizedInput = normalizeString(textInput);
       const correctAnswers = currentQ.correctAnswer.split('|');
       isCorrectDisplay = correctAnswers.some(ans => normalizedInput === normalizeString(ans));
       
-    } else if (type === 'multi') {
+    } else if (type.includes('multi')) {
       // ★ 修正: 数字指定にも対応した normalizedCorrectAnswers を使って判定
       const correctArr = normalizedCorrectAnswers;
       
@@ -1590,7 +1630,7 @@ export default function App() {
             <div className="bg-white/60 rounded-xl p-4 mb-2">
               <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">今回の解答</p>
               <p className={`text-lg font-bold break-words ${isCorrectDisplay ? 'text-emerald-700' : 'text-red-600'}`}>
-                {getCurrentType() === 'input' 
+                {getCurrentType().includes('input')
                   ? (textInput || '(未入力)')
                   : (selectedOptions.length > 0 ? selectedOptions.join(', ') : '(未選択)')
                 }
@@ -1638,6 +1678,26 @@ export default function App() {
             </div>
           </div>
         )}
+      </div>
+
+      {/* ★ 修正: z-indexを上げて確実に前面に表示 */}
+      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 p-4 z-50 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
+        <div className="max-w-2xl mx-auto">
+          {!showExplanation ? (
+            <Button onClick={checkAnswer} className="w-full" size="large" disabled={!canCheck}>
+              解答する
+            </Button>
+          ) : (
+            <Button 
+              onClick={nextQuestion} 
+              className="w-full" 
+              size="large"
+              variant={isLastQuestion ? "secondary" : "primary"}
+            >
+              {isLastQuestion ? '学習を終了して結果を見る' : '次の問題へ'}
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* ★ 画像拡大モーダル（修正済み） */}
