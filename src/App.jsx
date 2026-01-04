@@ -60,6 +60,8 @@ const COURSES = [
   { id: 'med-study-app', name: '試験対策' },
   { id: 'cbt-basic-app', name: 'CBT対策_基礎' },
   { id: 'cbt-clinical-app', name: 'CBT対策_臨床' },
+  { id: 'qa-basic-app', name: 'QA_基礎' },
+  { id: 'qa-clinical-app', name: 'QA_臨床' },
 ];
 
 // --- Firebase Configuration (設定エリア) ---
@@ -1587,25 +1589,6 @@ export default function App() {
             </div>
           </div>
         )}
-      </div>
-
-      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 p-4 z-20 safe-area-bottom shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
-        <div className="max-w-2xl mx-auto">
-          {!showExplanation ? (
-            <Button onClick={checkAnswer} className="w-full" size="large" disabled={!canCheck}>
-              解答する
-            </Button>
-          ) : (
-            <Button 
-              onClick={nextQuestion} 
-              className="w-full" 
-              size="large"
-              variant={isLastQuestion ? "secondary" : "primary"}
-            >
-              {isLastQuestion ? '学習を終了して結果を見る' : '次の問題へ'}
-            </Button>
-          )}
-        </div>
       </div>
 
       {/* ★ 画像拡大モーダル（修正済み） */}
