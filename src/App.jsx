@@ -306,13 +306,24 @@ export default function App() {
   const currentQ = questions[currentQuestionIndex];
   const isLastQuestion = questions.length > 0 && currentQuestionIndex === questions.length - 1;
   const isReviewMode = mode === 'review' || mode === 'custom-review';
-  const canCheck = currentQ 
-    ? (currentQ.type === 'input' ? textInput.length > 0 : selectedOptions.length > 0)
-    : false;
+  
+  // ★ 修正: 安全にtypeを取得するヘルパー
+  const getCurrentType = () => {
+    if (!currentQ) return 'single';
+    return (currentQ.type || 'single').toLowerCase().trim();
+  };
+  
+  const canCheck = useMemo(() => {
+    if (!currentQ) return false;
+    const type = getCurrentType();
+    if (type === 'input') return textInput.length > 0;
+    return selectedOptions.length > 0;
+  }, [currentQ, textInput, selectedOptions]);
 
   // 選択肢シャッフル
   const currentOptions = useMemo(() => {
-    if (!currentQ || !Array.isArray(currentQ.options) || currentQ.type === 'input') {
+    const type = getCurrentType();
+    if (!currentQ || !Array.isArray(currentQ.options) || type === 'input') {
       return [];
     }
     return shuffleArray(currentQ.options);
@@ -522,18 +533,18 @@ export default function App() {
           const options = rest.filter(o => o && o.trim() !== '');
 
           let correctAnswer = correctAnswerRaw;
-          if (type === 'multi') {
+          if (type && type.includes('multi')) {
             correctAnswer = correctAnswerRaw.split('|').map(s => s.trim());
           }
           
           const displayId = `${uploadBatchNum}_${i - startIdx + 1}`;
 
           newQuestions.push({
-            type: type.trim(),
+            type: (type || 'single').trim(),
             category: category.trim(),
             questionText: questionText.trim(),
             imageUrl: imageUrl ? imageUrl.trim() : '', 
-            options: type === 'input' ? [] : options,
+            options: (type && type.includes('input')) ? [] : options,
             correctAnswer,
             explanation: explanation.trim(),
             createdAt: new Date().toISOString(),
@@ -708,30 +719,34 @@ export default function App() {
     setImageModalUrl(null);
   };
 
+  // ★ 修正: クリック処理を頑健に
   const handleOptionSelect = (option) => {
     if (showExplanation) return;
-    if (currentQ.type === 'single') {
-      setSelectedOptions([option]);
-    } else if (currentQ.type === 'multi') {
+    const type = getCurrentType();
+    
+    // typeが 'input' でない限り、デフォルトでsingle扱い
+    if (type === 'multi') {
       if (selectedOptions.includes(option)) {
         setSelectedOptions(selectedOptions.filter(o => o !== option));
       } else {
         setSelectedOptions([...selectedOptions, option]);
       }
+    } else {
+      // single, または不明なタイプはすべて単一選択
+      setSelectedOptions([option]);
     }
   };
 
   const checkAnswer = async () => {
     let isCorrect = false;
+    const type = getCurrentType();
 
-    if (currentQ.type === 'input') {
+    if (type === 'input') {
       const normalize = (str) => str.replace(/\s+/g, '').toLowerCase();
       const normalizedInput = normalizeString(textInput);
       const correctAnswers = currentQ.correctAnswer.split('|');
       isCorrect = correctAnswers.some(ans => normalizedInput === normalizeString(ans));
-    } else if (currentQ.type === 'single') {
-      isCorrect = isAnswerMatch(selectedOptions[0], normalizedCorrectAnswers[0]);
-    } else if (currentQ.type === 'multi') {
+    } else if (type === 'multi') {
       const correctArr = normalizedCorrectAnswers;
       if (selectedOptions.length === correctArr.length) {
         isCorrect = selectedOptions.every(opt => 
@@ -740,6 +755,9 @@ export default function App() {
       } else {
         isCorrect = false;
       }
+    } else {
+      // single default
+      isCorrect = isAnswerMatch(selectedOptions[0], normalizedCorrectAnswers[0]);
     }
 
     if (isCorrect) {
@@ -760,7 +778,7 @@ export default function App() {
         ...prevHistory,
         isCorrect,
         timestamp: new Date().toISOString(),
-        lastAnswer: currentQ.type === 'input' ? textInput : selectedOptions,
+        lastAnswer: type === 'input' ? textInput : selectedOptions,
         wrongCount: newWrongCount,
         attemptCount: newAttemptCount,
         isUnsure: false 
@@ -1213,155 +1231,6 @@ export default function App() {
     );
   }
 
-  if (view === 'result') {
-    const correctRate = Math.round((sessionStats.correct / sessionStats.total) * 100) || 0;
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-        <div className="bg-white p-8 rounded-3xl shadow-xl w-full max-w-md text-center space-y-8">
-          <div className="bg-blue-100 w-20 h-20 rounded-full flex items-center justify-center mx-auto">
-            <Award className="text-blue-600 w-10 h-10" />
-          </div>
-          
-          <div>
-            <h2 className="text-2xl font-bold text-gray-800 mb-2">演習完了！</h2>
-            <p className="text-gray-500">お疲れ様でした。今回の結果です。</p>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4 bg-gray-50 p-6 rounded-2xl">
-            <div>
-              <p className="text-sm text-gray-500 font-bold mb-1">正解数</p>
-              <p className="text-3xl font-bold text-gray-800">{sessionStats.correct} <span className="text-sm text-gray-400">/ {sessionStats.total}</span></p>
-            </div>
-            <div>
-              <p className="text-sm text-gray-500 font-bold mb-1">正答率</p>
-              <p className="text-3xl font-bold text-blue-600">{correctRate}%</p>
-            </div>
-          </div>
-
-          <Button onClick={() => setView('dashboard')} size="large" className="w-full">
-            <Home size={20} /> ダッシュボードへ戻る
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
-  if (view === 'admin') {
-    return (
-      <div className="min-h-screen bg-gray-50">
-        <header className="bg-white shadow-sm px-6 py-4 flex items-center sticky top-0 z-20 safe-area-top gap-4">
-          <button onClick={() => setView('dashboard')} className="p-2 -ml-2 text-gray-500 hover:bg-gray-100 rounded-full">
-            <ArrowLeft size={24} />
-          </button>
-          {/* ★ ヘッダーにコース名表示 */}
-          <div>
-            <h1 className="text-xl font-bold text-gray-800">問題管理</h1>
-            <p className="text-xs text-blue-600 font-bold">{COURSES.find(c=>c.id===currentAppId).name} コース編集中</p>
-          </div>
-        </header>
-
-        <main className="p-6 max-w-2xl mx-auto pb-32 space-y-8">
-          
-          {/* CSV Import */}
-          <div className="bg-white rounded-3xl shadow-sm p-6 space-y-4 border border-blue-100">
-            <h2 className="font-bold text-gray-800 flex items-center gap-2">
-              <FileText className="text-blue-600" /> Excel/CSV一括登録
-            </h2>
-            <div className="space-y-3">
-              <div className="flex items-center gap-2 p-2 bg-blue-50 rounded-lg">
-                <span className="text-xs font-bold text-blue-700 whitespace-nowrap">今回アップロード回数:</span>
-                <Input 
-                  type="number" 
-                  value={uploadBatchNum} 
-                  onChange={(e) => setUploadBatchNum(e.target.value)}
-                  className="w-20 py-1 px-2 text-center text-sm h-8"
-                  placeholder="3"
-                />
-                <span className="text-xs text-blue-500">例: 3を入力→ 3_1, 3_2...</span>
-              </div>
-
-              <div className="flex gap-3">
-                <Button onClick={downloadTemplate} variant="secondary" size="small" className="flex-1">
-                  <Download size={16} /> 雛形DL
-                </Button>
-                <div className="relative flex-1">
-                  <input type="file" accept=".csv" onChange={handleFileUpload} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
-                  <Button variant="success" size="small" className="w-full">
-                    <Upload size={16} /> CSV読込
-                  </Button>
-                </div>
-              </div>
-            </div>
-            {importStatus && <p className="text-sm font-bold text-center text-blue-600">{importStatus}</p>}
-          </div>
-
-          {/* Delete Controls */}
-          <div className="bg-white rounded-3xl shadow-sm p-6 space-y-6 border border-red-100">
-            <h2 className="font-bold text-gray-800 flex items-center gap-2 text-red-600">
-              <Trash2 className="text-red-600" /> 削除メニュー
-            </h2>
-            
-            <div className="space-y-2">
-              <p className="text-sm font-bold text-gray-600">ID範囲指定削除</p>
-              <div className="flex gap-2 items-center">
-                <div className="w-20 shrink-0">
-                  <Input type="number" placeholder="回" value={deleteRange.batch} onChange={e=>setDeleteRange({...deleteRange, batch:e.target.value})} className="text-center"/>
-                </div>
-                <span className="text-gray-400 font-bold">の</span>
-                <Input type="number" placeholder="開始No." value={deleteRange.start} onChange={e=>setDeleteRange({...deleteRange, start:e.target.value})} className="text-center"/>
-                <span className="text-gray-400 font-bold">〜</span>
-                <Input type="number" placeholder="終了No." value={deleteRange.end} onChange={e=>setDeleteRange({...deleteRange, end:e.target.value})} className="text-center"/>
-              </div>
-              <p className="text-xs text-gray-400 text-center">例: 「3」の「2」〜「50」→ ID 3_2 〜 3_50 を削除</p>
-              <Button onClick={handleDeleteRange} variant="danger" size="small" className="w-full mt-2">
-                指定範囲を削除
-              </Button>
-            </div>
-
-            <div className="pt-4 border-t border-gray-100">
-              <Button onClick={handleDeleteAll} variant="dangerSolid" className="w-full">
-                <Trash2 size={20} /> 全ての問題を削除
-              </Button>
-            </div>
-          </div>
-
-          {/* Question List */}
-          <div className="bg-white rounded-3xl shadow-sm p-6 space-y-4">
-              <h2 className="font-bold text-gray-800 flex items-center gap-2 border-b pb-4">
-              <List className="text-gray-600" /> 登録済み問題 ({questions.length})
-            </h2>
-            <div className="space-y-3 max-h-[500px] overflow-y-auto pr-2">
-              {questions.map((q, idx) => (
-                <div key={q.id} className="flex items-start gap-3 p-4 border border-gray-100 rounded-2xl hover:bg-gray-50 transition-colors">
-                  <div className="flex flex-col gap-1 shrink-0 mt-0.5">
-                    <span className="bg-gray-200 text-gray-600 text-xs font-bold px-2 py-1 rounded-md text-center">
-                      No.{idx + 1}
-                    </span>
-                    {/* ★ 管理用ID表示 */}
-                    <span className="bg-blue-50 text-blue-600 text-[10px] font-bold px-1 py-0.5 rounded text-center border border-blue-100">
-                      {q.displayId || '-'}
-                    </span>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-                      <span className="text-[10px] bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full font-bold">{q.category}</span>
-                      <span className="text-[10px] bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full font-bold">{q.type}</span>
-                    </div>
-                    <p className="text-sm font-bold text-gray-800 line-clamp-2 leading-relaxed">{q.questionText}</p>
-                  </div>
-                  <button onClick={() => handleDeleteQuestion(q.id)} className="p-2 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all shrink-0">
-                    <Trash2 size={18} />
-                  </button>
-                </div>
-              ))}
-              {questions.length === 0 && <p className="text-gray-400 text-center py-8">問題が登録されていません</p>}
-            </div>
-          </div>
-        </main>
-      </div>
-    );
-  }
-
   // 4. Quiz Screen (Safe Guard)
   if (!currentQ && view === 'quiz') {
     return (
@@ -1376,17 +1245,16 @@ export default function App() {
   // Quiz Rendering Logic
   let isCorrectDisplay = false;
   if (showExplanation && currentQ) {
-    if (currentQ.type === 'input') {
+    const type = getCurrentType();
+    
+    if (type === 'input') {
       const normalize = (str) => str.replace(/\s+/g, '').toLowerCase();
       // 記述式の別解対応
       const normalizedInput = normalizeString(textInput);
       const correctAnswers = currentQ.correctAnswer.split('|');
       isCorrectDisplay = correctAnswers.some(ans => normalizedInput === normalizeString(ans));
       
-    } else if (currentQ.type === 'single') {
-      // ★ 修正: singleの場合も正規化済みの正解(テキスト)を使用
-      isCorrectDisplay = isAnswerMatch(selectedOptions[0], normalizedCorrectAnswers[0]);
-    } else if (currentQ.type === 'multi') {
+    } else if (type === 'multi') {
       // ★ 修正: 数字指定にも対応した normalizedCorrectAnswers を使って判定
       const correctArr = normalizedCorrectAnswers;
       
@@ -1397,6 +1265,9 @@ export default function App() {
       } else {
         isCorrectDisplay = false;
       }
+    } else {
+      // single
+      isCorrectDisplay = isAnswerMatch(selectedOptions[0], normalizedCorrectAnswers[0]);
     }
   }
 
@@ -1435,7 +1306,7 @@ export default function App() {
             <div className="flex items-center gap-2 mb-4">
               <span className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-1 rounded-md">{currentQ.category}</span>
               <span className="bg-gray-100 text-gray-600 text-xs font-bold px-2 py-1 rounded-md">
-                {currentQ.type === 'multi' ? '複数選択' : currentQ.type === 'input' ? '記述' : '単一選択'}
+                {getCurrentType() === 'multi' ? '複数選択' : getCurrentType() === 'input' ? '記述' : '単一選択'}
               </span>
             </div>
             <h2 className="text-xl font-bold text-gray-900 leading-relaxed mb-8">{currentQ.questionText}</h2>
@@ -1461,7 +1332,7 @@ export default function App() {
             )}
 
             <div className="space-y-3">
-              {currentQ.type === 'input' ? (
+              {getCurrentType() === 'input' ? (
                 <div className="my-8">
                   <Input 
                     value={textInput}
@@ -1541,7 +1412,7 @@ export default function App() {
             <div className="bg-white/60 rounded-xl p-4 mb-2">
               <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">今回の解答</p>
               <p className={`text-lg font-bold break-words ${isCorrectDisplay ? 'text-emerald-700' : 'text-red-600'}`}>
-                {currentQ.type === 'input' 
+                {getCurrentType() === 'input' 
                   ? (textInput || '(未入力)')
                   : (selectedOptions.length > 0 ? selectedOptions.join(', ') : '(未選択)')
                 }
@@ -1575,7 +1446,7 @@ export default function App() {
               <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">正解</p>
               <p className="text-lg font-bold text-gray-900 break-words">
                 {/* inputなら / 区切り、それ以外は , 区切りで見やすく表示 (normalizedを使用) */}
-                {currentQ.type === 'input' 
+                {getCurrentType() === 'input' 
                   ? currentQ.correctAnswer.split('|').join(' / ') 
                   : normalizedCorrectAnswers.join(', ')}
               </p>
@@ -1589,6 +1460,25 @@ export default function App() {
             </div>
           </div>
         )}
+      </div>
+
+      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 p-4 z-20 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
+        <div className="max-w-2xl mx-auto">
+          {!showExplanation ? (
+            <Button onClick={checkAnswer} className="w-full" size="large" disabled={!canCheck}>
+              解答する
+            </Button>
+          ) : (
+            <Button 
+              onClick={nextQuestion} 
+              className="w-full" 
+              size="large"
+              variant={isLastQuestion ? "secondary" : "primary"}
+            >
+              {isLastQuestion ? '学習を終了して結果を見る' : '次の問題へ'}
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* ★ 画像拡大モーダル（修正済み） */}
