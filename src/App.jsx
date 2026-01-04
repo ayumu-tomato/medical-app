@@ -1231,6 +1231,184 @@ export default function App() {
     );
   }
 
+  if (view === 'admin') {
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <header className="bg-white shadow-sm px-6 py-4 flex items-center sticky top-0 z-20 safe-area-top gap-4">
+          <button onClick={() => setView('dashboard')} className="p-2 -ml-2 text-gray-500 hover:bg-gray-100 rounded-full">
+            <ArrowLeft size={24} />
+          </button>
+          {/* ★ ヘッダーにコース名表示 */}
+          <div>
+            <h1 className="text-xl font-bold text-gray-800">問題管理</h1>
+            <p className="text-xs text-blue-600 font-bold">{COURSES.find(c=>c.id===currentAppId).name} コース編集中</p>
+          </div>
+        </header>
+
+        <main className="p-6 max-w-2xl mx-auto pb-32 space-y-8">
+          
+          {/* ★ Manual Add Question (Restored) */}
+          <div className="bg-white rounded-3xl shadow-sm p-6 space-y-4 border border-green-100">
+            <h2 className="font-bold text-gray-800 flex items-center gap-2">
+              <Plus className="text-green-600" /> 手動で問題を追加
+            </h2>
+            <div className="space-y-4">
+               <div className="grid grid-cols-2 gap-4">
+                 <select value={newQ.type} onChange={(e) => setNewQ({...newQ, type: e.target.value})} className="w-full px-4 py-2 rounded-xl border-2 border-gray-100 focus:ring-2 focus:ring-green-500 outline-none bg-gray-50">
+                   <option value="single">単一選択</option>
+                   <option value="multi">複数選択</option>
+                   <option value="input">記述式</option>
+                 </select>
+                 <Input value={newQ.category} onChange={(e) => setNewQ({...newQ, category: e.target.value})} placeholder="カテゴリ (例: 循環器)" />
+               </div>
+               
+               <textarea 
+                 value={newQ.questionText} 
+                 onChange={(e) => setNewQ({...newQ, questionText: e.target.value})} 
+                 placeholder="問題文を入力..." 
+                 className="w-full px-4 py-3 rounded-xl border-2 border-gray-200 focus:ring-2 focus:ring-green-500 outline-none h-24 resize-none bg-gray-50"
+               />
+               <Input value={newQ.imageUrl} onChange={(e) => setNewQ({...newQ, imageUrl: e.target.value})} placeholder="画像URL (Google Drive共有リンク可)" />
+
+               {newQ.type === 'input' ? (
+                 <Input value={newQ.correctAnswerInput} onChange={(e) => setNewQ({...newQ, correctAnswerInput: e.target.value})} placeholder="正解 (複数の場合は | で区切る)" />
+               ) : (
+                 <div className="space-y-2">
+                   {newQ.options.map((opt, idx) => (
+                     <div key={idx} className="flex gap-2 items-center">
+                       <input 
+                         type="checkbox" 
+                         checked={adminSelectedIndices.includes(idx)} 
+                         onChange={() => {
+                           if (newQ.type === 'single') setAdminSelectedIndices([idx]);
+                           else {
+                             if (adminSelectedIndices.includes(idx)) setAdminSelectedIndices(adminSelectedIndices.filter(i => i !== idx));
+                             else setAdminSelectedIndices([...adminSelectedIndices, idx]);
+                           }
+                         }}
+                         className="w-5 h-5 accent-green-600"
+                       />
+                       <Input value={opt} onChange={(e) => {
+                         const newOpts = [...newQ.options];
+                         newOpts[idx] = e.target.value;
+                         setNewQ({...newQ, options: newOpts});
+                       }} placeholder={`選択肢 ${idx + 1}`} />
+                     </div>
+                   ))}
+                 </div>
+               )}
+
+               <textarea 
+                 value={newQ.explanation} 
+                 onChange={(e) => setNewQ({...newQ, explanation: e.target.value})} 
+                 placeholder="解説を入力..." 
+                 className="w-full px-4 py-3 rounded-xl border-2 border-gray-200 focus:ring-2 focus:ring-green-500 outline-none h-24 resize-none bg-gray-50"
+               />
+               <Button onClick={handleCreateQuestion} variant="success" className="w-full">追加する</Button>
+            </div>
+          </div>
+
+          {/* CSV Import */}
+          <div className="bg-white rounded-3xl shadow-sm p-6 space-y-4 border border-blue-100">
+            <h2 className="font-bold text-gray-800 flex items-center gap-2">
+              <FileText className="text-blue-600" /> Excel/CSV一括登録
+            </h2>
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 p-2 bg-blue-50 rounded-lg">
+                <span className="text-xs font-bold text-blue-700 whitespace-nowrap">今回アップロード回数:</span>
+                <Input 
+                  type="number" 
+                  value={uploadBatchNum} 
+                  onChange={(e) => setUploadBatchNum(e.target.value)}
+                  className="w-20 py-1 px-2 text-center text-sm h-8"
+                  placeholder="3"
+                />
+                <span className="text-xs text-blue-500">例: 3を入力→ 3_1, 3_2...</span>
+              </div>
+
+              <div className="flex gap-3">
+                <Button onClick={downloadTemplate} variant="secondary" size="small" className="flex-1">
+                  <Download size={16} /> 雛形DL
+                </Button>
+                <div className="relative flex-1">
+                  <input type="file" accept=".csv" onChange={handleFileUpload} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
+                  <Button variant="success" size="small" className="w-full">
+                    <Upload size={16} /> CSV読込
+                  </Button>
+                </div>
+              </div>
+            </div>
+            {importStatus && <p className="text-sm font-bold text-center text-blue-600">{importStatus}</p>}
+          </div>
+
+          {/* Delete Controls */}
+          <div className="bg-white rounded-3xl shadow-sm p-6 space-y-6 border border-red-100">
+            <h2 className="font-bold text-gray-800 flex items-center gap-2 text-red-600">
+              <Trash2 className="text-red-600" /> 削除メニュー
+            </h2>
+            
+            <div className="space-y-2">
+              <p className="text-sm font-bold text-gray-600">ID範囲指定削除</p>
+              <div className="flex gap-2 items-center">
+                <div className="w-20 shrink-0">
+                  <Input type="number" placeholder="回" value={deleteRange.batch} onChange={e=>setDeleteRange({...deleteRange, batch:e.target.value})} className="text-center"/>
+                </div>
+                <span className="text-gray-400 font-bold">の</span>
+                <Input type="number" placeholder="開始No." value={deleteRange.start} onChange={e=>setDeleteRange({...deleteRange, start:e.target.value})} className="text-center"/>
+                <span className="text-gray-400 font-bold">〜</span>
+                <Input type="number" placeholder="終了No." value={deleteRange.end} onChange={e=>setDeleteRange({...deleteRange, end:e.target.value})} className="text-center"/>
+              </div>
+              <p className="text-xs text-gray-400 text-center">例: 「3」の「2」〜「50」→ ID 3_2 〜 3_50 を削除</p>
+              <Button onClick={handleDeleteRange} variant="danger" size="small" className="w-full mt-2">
+                指定範囲を削除
+              </Button>
+            </div>
+
+            <div className="pt-4 border-t border-gray-100">
+              <Button onClick={handleDeleteAll} variant="dangerSolid" className="w-full">
+                <Trash2 size={20} /> 全ての問題を削除
+              </Button>
+            </div>
+          </div>
+
+          {/* Question List */}
+          <div className="bg-white rounded-3xl shadow-sm p-6 space-y-4">
+              <h2 className="font-bold text-gray-800 flex items-center gap-2 border-b pb-4">
+              <List className="text-gray-600" /> 登録済み問題 ({questions.length})
+            </h2>
+            <div className="space-y-3 max-h-[500px] overflow-y-auto pr-2">
+              {questions.map((q, idx) => (
+                <div key={q.id} className="flex items-start gap-3 p-4 border border-gray-100 rounded-2xl hover:bg-gray-50 transition-colors">
+                  <div className="flex flex-col gap-1 shrink-0 mt-0.5">
+                    <span className="bg-gray-200 text-gray-600 text-xs font-bold px-2 py-1 rounded-md text-center">
+                      No.{idx + 1}
+                    </span>
+                    {/* ★ 管理用ID表示 */}
+                    <span className="bg-blue-50 text-blue-600 text-[10px] font-bold px-1 py-0.5 rounded text-center border border-blue-100">
+                      {q.displayId || '-'}
+                    </span>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                      <span className="text-[10px] bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full font-bold">{q.category}</span>
+                      <span className="text-[10px] bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full font-bold">{q.type}</span>
+                    </div>
+                    {/* ★ 修正: 問題文の表示を削除（または非常に短く）してリストをすっきりさせる */}
+                    {/* <p className="text-sm font-bold text-gray-800 line-clamp-2 leading-relaxed">{q.questionText}</p> */}
+                  </div>
+                  <button onClick={() => handleDeleteQuestion(q.id)} className="p-2 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all shrink-0">
+                    <Trash2 size={18} />
+                  </button>
+                </div>
+              ))}
+              {questions.length === 0 && <p className="text-gray-400 text-center py-8">問題が登録されていません</p>}
+            </div>
+          </div>
+        </main>
+      </div>
+    );
+  }
+
   // 4. Quiz Screen (Safe Guard)
   if (!currentQ && view === 'quiz') {
     return (
@@ -1460,25 +1638,6 @@ export default function App() {
             </div>
           </div>
         )}
-      </div>
-
-      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 p-4 z-20 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
-        <div className="max-w-2xl mx-auto">
-          {!showExplanation ? (
-            <Button onClick={checkAnswer} className="w-full" size="large" disabled={!canCheck}>
-              解答する
-            </Button>
-          ) : (
-            <Button 
-              onClick={nextQuestion} 
-              className="w-full" 
-              size="large"
-              variant={isLastQuestion ? "secondary" : "primary"}
-            >
-              {isLastQuestion ? '学習を終了して結果を見る' : '次の問題へ'}
-            </Button>
-          )}
-        </div>
       </div>
 
       {/* ★ 画像拡大モーダル（修正済み） */}
