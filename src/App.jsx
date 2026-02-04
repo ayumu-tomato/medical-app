@@ -170,8 +170,8 @@ const groupAndShuffleQuestions = (questions) => {
     const match = q.customId ? q.customId.match(/^(\d{10})_(\d+)$/) : null;
     
     if (isSeries && match) {
-      const groupId = match[1]; 
-      const order = parseInt(match[2], 10); 
+      const groupId = match[1]; // 2334412679
+      const order = parseInt(match[2], 10); // 1
       
       if (!groups[groupId]) {
         groups[groupId] = [];
@@ -183,18 +183,21 @@ const groupAndShuffleQuestions = (questions) => {
     }
   });
 
-  // 連問グループ内のソート
+  // 連問グループ内のソート (1 -> 2 -> 3)
   Object.values(groups).forEach(group => {
     group.sort((a, b) => a._order - b._order);
   });
 
-  // グループと単独問題を混ぜてシャッフル
+  // 単独問題を1つのグループとして扱う
   const mixedGroups = [
-    ...Object.values(groups), 
-    ...singles.map(q => [q])  
+    ...Object.values(groups), // 連問グループの配列
+    ...singles.map(q => [q])  // 単独問題をそれぞれ配列に入れたもの
   ];
 
+  // グループ単位でシャッフル
   const shuffledGroups = shuffleArray(mixedGroups);
+
+  // フラットな配列に戻す
   return shuffledGroups.flat();
 };
 
@@ -343,6 +346,7 @@ export default function App() {
     if (!currentQ || !Array.isArray(currentQ.options) || type.includes('input')) {
       return [];
     }
+    // single, multi, hyper はシャッフル
     return shuffleArray(currentQ.options);
   }, [currentQ]);
 
@@ -451,7 +455,7 @@ export default function App() {
         loadedQuestions = qSnap.docs.map(doc => ({...doc.data(), id: doc.id}));
       }
       
-      // デフォルトソート: displayId (バッチ番号) 順
+      // デフォルトソート
       loadedQuestions.sort((a, b) => {
         if (a.displayId && b.displayId) {
            const [aBatch, aNum] = a.displayId.split('_').map(Number);
@@ -474,16 +478,17 @@ export default function App() {
   };
 
   const downloadTemplate = () => {
-    // 新しいCSVフォーマットのテンプレート
+    // テンプレート (series/hyper用)
     const headers = "id,type,category,questionText,correctAnswer,imageUrl,caseText,explanation,option1,option2,option3,option4,option5";
     const example1 = '2334412679_1,series,循環器,"連問の例",QT延長,"https://example.com/image.jpg","79歳の男性...","解説文",QT延長,洞性徐脈,心房細動,房室接合部調律,II度房室ブロック';
-    const example2 = ',single,一般,"通常問題の例",正解,,,解説文は後ろでもOK,選択肢1,選択肢2,選択肢3,選択肢4,選択肢5,解説文(旧形式)';
+    // テンプレート (single/multi/input用)
+    const example2 = ',single,一般,"通常問題",正解,"",,,選択肢1,選択肢2,選択肢3,選択肢4,選択肢5,解説文';
     const csvContent = "\uFEFF" + [headers, example1, example2].join("\n");
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.setAttribute('download', 'question_template_v5.csv');
+    link.setAttribute('download', 'question_template.csv');
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -515,7 +520,7 @@ export default function App() {
         const text = e.target.result;
         const lines = text.split(/\r\n|\n/).filter(line => line.trim() !== '');
         
-        // ヘッダー行を解析
+        // ヘッダー行を解析 (series/hyper用)
         const headers = lines[0].split(',').map(h => h.trim());
         const idx = {
           id: headers.indexOf('id'),
@@ -535,8 +540,8 @@ export default function App() {
           const cols = parseCSVLine(lines[i]);
           if (cols.length < 4) continue;
 
-          // まずtypeを取得して判定
-          // ヘッダーがあればそこから、なければ先頭カラムと仮定
+          // まずtypeを取得
+          // 新形式ヘッダーがあるならtype列、なければ先頭(0)と仮定
           let type = idx.type > -1 ? cols[idx.type] : cols[0];
           type = (type || 'single').trim();
 
@@ -549,11 +554,9 @@ export default function App() {
           let explanation = '';
           let options = [];
 
-          // ★ パース分岐: series/hyper は新形式、それ以外は旧形式(互換)
           if (type === 'series' || type === 'hyper') {
-             // 新形式: option以外は固定位置、残りをoptionとする
-             // id, type, cat, q, ans, img, case, exp, opt1...
-             // もしヘッダーがあるならヘッダー優先
+             // ★ 新形式 (series / hyper)
+             // id, type, cat, q, ans, img, case, exp, options...
              if (idx.type > -1) {
                customId = idx.id > -1 ? cols[idx.id] : '';
                category = idx.category > -1 ? cols[idx.category] : '';
@@ -563,55 +566,46 @@ export default function App() {
                caseText = idx.case > -1 ? cols[idx.case] : '';
                explanation = idx.exp > -1 ? cols[idx.exp] : '';
                
-               // オプション収集: option1という名前の列以降、または明示的にヘッダー名で収集
+               // オプション収集
                headers.forEach((h, colIndex) => {
                  if (h.startsWith('option') && cols[colIndex]) {
                    options.push(cols[colIndex]);
                  }
                });
              } else {
-               // ヘッダーなしの場合の series/hyper デフォルト順序
-               // 0:id, 1:type, 2:cat, 3:q, 4:ans, 5:img, 6:case, 7:exp, 8~:opts
+               // ヘッダーなしデフォルト順
                [customId, , category, questionText, correctAnswer, imageUrl, caseText, explanation, ...options] = cols;
              }
 
           } else {
-             // ★ 旧形式 (single, multi, input): 解説・症例は「後ろ」にある
-             // type, cat, q, ans, img, o1, o2... , exp, case
-             // inputの場合はオプションなし
+             // ★ 旧形式 (single / multi / input)
+             // 厳密な列固定: 0:type, 1:category, 2:q, 3:ans, 4:img, 5~9:options, 10:exp
              
-             // ヘッダーがある場合でも、旧形式互換のために列位置ベースで処理するか、ヘッダーを信じるか。
-             // ユーザー要望「元に戻して」に従い、列位置ベース（可変長のオプション + 末尾2つ）で処理する。
+             // typeは既に取得済み (cols[0] or idx.type)
+             // ここでは「左から順に」という指定なので、インデックス固定で取得
              
-             // 基本5列
-             let optsAndSuffix = [];
-             [type, category, questionText, correctAnswer, imageUrl, ...optsAndSuffix] = cols;
+             type = cols[0];
+             category = cols[1] || '';
+             questionText = cols[2] || '';
+             correctAnswer = cols[3] || '';
+             imageUrl = cols[4] || '';
              
-             if (type.includes('input')) {
-               // input: オプションなし。末尾2つが exp, case かもしれない
-               // しかしinputはオプション列自体が空欄で入っていることが多い。
-               // 安全策: optsAndSuffix の中から空でないものを探し、末尾をexpとする
-               const validVals = optsAndSuffix.filter(v => v && v.trim() !== '');
-               if (validVals.length > 0) explanation = validVals.pop(); // 最後は解説
-               if (validVals.length > 0) caseText = validVals.pop(); // その前は症例(もしあれば)
-               options = [];
+             // options (5-9)
+             if (!type.includes('input')) {
+               for (let k = 5; k <= 9; k++) {
+                 if (cols[k]) options.push(cols[k]);
+               }
              } else {
-               // single/multi: 末尾2つを exp, case として取り出し、残りをオプションとする
-               // ただし「解説がない」場合もあるので要注意だが、テンプレート通りなら末尾にあるはず
-               
-               // 安全策: 空文字を除去した上で、末尾から取得
-               // 通常テンプレート: type...img, o1, o2, o3, o4, o5, exp, case
-               
-               // まず生配列から末尾を取得
-               caseText = optsAndSuffix.pop() || ''; // 一番最後
-               explanation = optsAndSuffix.pop() || ''; // その前
-               
-               // 残りをオプションとする
-               options = optsAndSuffix.filter(o => o && o.trim() !== '');
+               options = [];
              }
+             
+             explanation = cols[10] || '';
+             caseText = ''; // このタイプには存在しない
+             customId = ''; // このタイプには存在しない
           }
           
-          // 共通クリーニング
+          // クリーニング
+          options = options.filter(o => o && o.trim() !== '');
           if (type && (type.includes('multi') || type === 'hyper')) {
              if (correctAnswer.includes('|')) {
                correctAnswer = correctAnswer.split('|').map(s => s.trim());
