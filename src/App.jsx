@@ -226,7 +226,8 @@ const INITIAL_QUESTIONS = [
     options: ['選択肢1', '選択肢2', '選択肢3', '選択肢4', '選択肢5'],
     correctAnswer: '選択肢1',
     explanation: 'これはサンプル解説です。管理画面からCSVをインポートしてください。',
-    caseText: '' 
+    caseText: '',
+    caseImageUrl: '' // 新フィールド
   }
 ];
 
@@ -316,7 +317,7 @@ export default function App() {
 
   // Admin State
   const [newQ, setNewQ] = useState({
-    customId: '', type: 'single', category: '', questionText: '', imageUrl: '', options: ['', '', '', '', ''], correctAnswerInput: '', explanation: '', caseText: ''
+    customId: '', type: 'single', category: '', questionText: '', imageUrl: '', options: ['', '', '', '', ''], correctAnswerInput: '', explanation: '', caseText: '', caseImageUrl: ''
   });
   const [adminSelectedIndices, setAdminSelectedIndices] = useState([]);
   const [deleteRange, setDeleteRange] = useState({ batch: '', start: '', end: '' });
@@ -478,17 +479,17 @@ export default function App() {
   };
 
   const downloadTemplate = () => {
-    // テンプレート (series/hyper用)
-    const headers = "id,type,category,questionText,correctAnswer,imageUrl,caseText,explanation,option1,option2,option3,option4,option5";
-    const example1 = '2334412679_1,series,循環器,"連問の例",QT延長,"https://example.com/image.jpg","79歳の男性...","解説文",QT延長,洞性徐脈,心房細動,房室接合部調律,II度房室ブロック';
+    // テンプレート (series/hyper用) - caseImageUrlを追加
+    const headers = "id,type,category,questionText,correctAnswer,imageUrl,caseText,caseImageUrl,explanation,option1,option2,option3,option4,option5";
+    const example1 = '2334412679_1,series,循環器,"連問の例",QT延長,"(問題画像)","79歳の男性...","(症例画像)","解説文",QT延長,洞性徐脈,心房細動,房室接合部調律,II度房室ブロック';
     // テンプレート (single/multi/input用)
-    const example2 = ',single,一般,"通常問題",正解,"",,,選択肢1,選択肢2,選択肢3,選択肢4,選択肢5,解説文';
+    const example2 = ',single,一般,"通常問題",正解,,,,"",解説文,選択肢1,選択肢2,選択肢3,選択肢4,選択肢5';
     const csvContent = "\uFEFF" + [headers, example1, example2].join("\n");
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.setAttribute('download', 'question_template.csv');
+    link.setAttribute('download', 'question_template_v6.csv');
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -530,6 +531,7 @@ export default function App() {
           ans: headers.indexOf('correctAnswer'),
           img: headers.indexOf('imageUrl'),
           case: headers.indexOf('caseText'),
+          caseImg: headers.indexOf('caseImageUrl'), // 追加
           exp: headers.indexOf('explanation')
         };
 
@@ -540,8 +542,6 @@ export default function App() {
           const cols = parseCSVLine(lines[i]);
           if (cols.length < 4) continue;
 
-          // まずtypeを取得
-          // 新形式ヘッダーがあるならtype列、なければ先頭(0)と仮定
           let type = idx.type > -1 ? cols[idx.type] : cols[0];
           type = (type || 'single').trim();
 
@@ -551,12 +551,13 @@ export default function App() {
           let correctAnswer = '';
           let imageUrl = '';
           let caseText = '';
+          let caseImageUrl = '';
           let explanation = '';
           let options = [];
 
           if (type === 'series' || type === 'hyper') {
              // ★ 新形式 (series / hyper)
-             // id, type, cat, q, ans, img, case, exp, options...
+             // ヘッダー依存
              if (idx.type > -1) {
                customId = idx.id > -1 ? cols[idx.id] : '';
                category = idx.category > -1 ? cols[idx.category] : '';
@@ -564,6 +565,7 @@ export default function App() {
                correctAnswer = idx.ans > -1 ? cols[idx.ans] : '';
                imageUrl = idx.img > -1 ? cols[idx.img] : '';
                caseText = idx.case > -1 ? cols[idx.case] : '';
+               caseImageUrl = idx.caseImg > -1 ? cols[idx.caseImg] : '';
                explanation = idx.exp > -1 ? cols[idx.exp] : '';
                
                // オプション収集
@@ -573,16 +575,13 @@ export default function App() {
                  }
                });
              } else {
-               // ヘッダーなしデフォルト順
-               [customId, , category, questionText, correctAnswer, imageUrl, caseText, explanation, ...options] = cols;
+               // ヘッダーなしデフォルト順 (id, type, cat, q, ans, img, case, caseImg, exp, opts...)
+               [customId, , category, questionText, correctAnswer, imageUrl, caseText, caseImageUrl, explanation, ...options] = cols;
              }
 
           } else {
              // ★ 旧形式 (single / multi / input)
              // 厳密な列固定: 0:type, 1:category, 2:q, 3:ans, 4:img, 5~9:options, 10:exp
-             
-             // typeは既に取得済み (cols[0] or idx.type)
-             // ここでは「左から順に」という指定なので、インデックス固定で取得
              
              type = cols[0];
              category = cols[1] || '';
@@ -590,7 +589,7 @@ export default function App() {
              correctAnswer = cols[3] || '';
              imageUrl = cols[4] || '';
              
-             // options (5-9)
+             // options (5-9) 固定5個
              if (!type.includes('input')) {
                for (let k = 5; k <= 9; k++) {
                  if (cols[k]) options.push(cols[k]);
@@ -600,8 +599,9 @@ export default function App() {
              }
              
              explanation = cols[10] || '';
-             caseText = ''; // このタイプには存在しない
-             customId = ''; // このタイプには存在しない
+             caseText = ''; // 存在しない
+             caseImageUrl = ''; // 存在しない
+             customId = ''; // 存在しない
           }
           
           // クリーニング
@@ -626,6 +626,7 @@ export default function App() {
             correctAnswer,
             explanation: explanation ? explanation.trim() : '',
             caseText: caseText ? caseText.trim() : '', 
+            caseImageUrl: caseImageUrl ? caseImageUrl.trim() : '',
             createdAt: new Date().toISOString(),
             displayId: displayId
           });
@@ -965,6 +966,7 @@ export default function App() {
       correctAnswer: finalCorrectAnswer,
       explanation: newQ.explanation,
       caseText: newQ.caseText || '', 
+      caseImageUrl: newQ.caseImageUrl || '',
       createdAt: new Date().toISOString(),
       displayId: "Manual" 
     };
@@ -974,7 +976,7 @@ export default function App() {
       setAllQuestions([...allQuestions, added]);
       setQuestions([...allQuestions, added]);
       alert('追加しました');
-      setNewQ({ customId: '', type: 'single', category: '', questionText: '', imageUrl: '', options: ['', '', '', '', ''], correctAnswerInput: '', explanation: '', caseText: '' });
+      setNewQ({ customId: '', type: 'single', category: '', questionText: '', imageUrl: '', options: ['', '', '', '', ''], correctAnswerInput: '', explanation: '', caseText: '', caseImageUrl: '' });
       setAdminSelectedIndices([]);
     } catch (e) { alert(e.message); }
   };
@@ -1287,7 +1289,10 @@ export default function App() {
                )}
 
                {newQ.type === 'series' && (
-                 <textarea value={newQ.caseText} onChange={(e) => setNewQ({...newQ, caseText: e.target.value})} placeholder="症例本文 (長文がある場合に入力)..." className="w-full px-4 py-3 rounded-xl border-2 border-gray-200 focus:ring-2 focus:ring-green-500 outline-none h-24 resize-none bg-gray-50" />
+                 <>
+                   <textarea value={newQ.caseText} onChange={(e) => setNewQ({...newQ, caseText: e.target.value})} placeholder="症例本文 (長文がある場合に入力)..." className="w-full px-4 py-3 rounded-xl border-2 border-gray-200 focus:ring-2 focus:ring-green-500 outline-none h-24 resize-none bg-gray-50" />
+                   <Input value={newQ.caseImageUrl} onChange={(e) => setNewQ({...newQ, caseImageUrl: e.target.value})} placeholder="症例画像URL (Google Drive共有リンク可)" />
+                 </>
                )}
 
                <textarea value={newQ.questionText} onChange={(e) => setNewQ({...newQ, questionText: e.target.value})} placeholder="問題文を入力..." className="w-full px-4 py-3 rounded-xl border-2 border-gray-200 focus:ring-2 focus:ring-green-500 outline-none h-24 resize-none bg-gray-50" />
@@ -1474,6 +1479,24 @@ export default function App() {
                 <div className="flex items-center gap-2 mb-2 text-blue-600 font-bold text-sm">
                   <CaseIcon size={16} /> 症例
                 </div>
+                {currentQ.caseImageUrl && (
+                  <div className="mb-4 flex justify-center">
+                    <div 
+                      className="relative group cursor-zoom-in"
+                      onClick={() => setImageModalUrl(currentQ.caseImageUrl)}
+                    >
+                      <img 
+                        src={convertToDirectLink(currentQ.caseImageUrl)} 
+                        alt="Case Image" 
+                        referrerPolicy="no-referrer"
+                        className="max-h-48 rounded-xl shadow-sm border border-blue-100 object-contain bg-white"
+                      />
+                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors rounded-xl flex items-center justify-center">
+                        <Maximize2 className="text-white opacity-0 group-hover:opacity-100 drop-shadow-md" size={24}/>
+                      </div>
+                    </div>
+                  </div>
+                )}
                 <p className="text-gray-700 text-sm leading-relaxed whitespace-pre-wrap">
                   {currentQ.caseText}
                 </p>
@@ -1668,3 +1691,4 @@ export default function App() {
     </div>
   );
 }
+
