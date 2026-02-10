@@ -70,12 +70,12 @@ const COURSES = [
 // --- Firebase Configuration (設定エリア) ---
 
 const firebaseConfig = {
-  apiKey: "AIzaSyBUaylHYEZNXL2jqojtILTaU0RrunJ6Rq0",
-  authDomain: "medical-study-a0154.firebaseapp.com",
-  projectId: "medical-study-a0154",
-  storageBucket: "medical-study-a0154.firebasestorage.app",
-  messagingSenderId: "422680487740",
-  appId: "1:422680487740:web:c9872f633f53469d7e6039"
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID
 };
 
 // アプリの初期化
@@ -165,8 +165,8 @@ const groupAndShuffleQuestions = (questions) => {
   const singles = [];
 
   questions.forEach(q => {
-    // typeが 'series' でかつ ID形式: XXXXXXXXXX_N (10桁_番号) がある場合のみグループ化
-    const isSeries = q.type === 'series';
+    // ★ 修正: typeが 'series' で始まるもの (series, series-multi, series-input) を連問として扱う
+    const isSeries = q.type && q.type.startsWith('series');
     const match = q.customId ? q.customId.match(/^(\d{10})_(\d+)$/) : null;
     
     if (isSeries && match) {
@@ -227,7 +227,7 @@ const INITIAL_QUESTIONS = [
     correctAnswer: '選択肢1',
     explanation: 'これはサンプル解説です。管理画面からCSVをインポートしてください。',
     caseText: '',
-    caseImageUrl: '' // 新フィールド
+    caseImageUrl: ''
   }
 ];
 
@@ -531,7 +531,7 @@ export default function App() {
           ans: headers.indexOf('correctAnswer'),
           img: headers.indexOf('imageUrl'),
           case: headers.indexOf('caseText'),
-          caseImg: headers.indexOf('caseImageUrl'), // 追加
+          caseImg: headers.indexOf('caseImageUrl'), 
           exp: headers.indexOf('explanation')
         };
 
@@ -555,8 +555,9 @@ export default function App() {
           let explanation = '';
           let options = [];
 
-          if (type === 'series' || type === 'hyper') {
-             // ★ 新形式 (series / hyper)
+          // ★ 修正: seriesで始まるもの、またはhyperの場合は拡張フォーマットとして扱う
+          if (type.startsWith('series') || type === 'hyper') {
+             // ★ 新形式
              // ヘッダー依存
              if (idx.type > -1) {
                customId = idx.id > -1 ? cols[idx.id] : '';
@@ -1276,7 +1277,7 @@ export default function App() {
                  <Input value={newQ.category} onChange={(e) => setNewQ({...newQ, category: e.target.value})} placeholder="カテゴリ (例: 循環器)" />
                </div>
                
-               {newQ.type === 'series' && (
+               {newQ.type.startsWith('series') && (
                  <div className="flex items-center gap-2 bg-gray-100 p-2 rounded-xl">
                    <LinkIcon size={16} className="text-gray-500"/>
                    <Input 
@@ -1288,7 +1289,7 @@ export default function App() {
                  </div>
                )}
 
-               {newQ.type === 'series' && (
+               {newQ.type.startsWith('series') && (
                  <>
                    <textarea value={newQ.caseText} onChange={(e) => setNewQ({...newQ, caseText: e.target.value})} placeholder="症例本文 (長文がある場合に入力)..." className="w-full px-4 py-3 rounded-xl border-2 border-gray-200 focus:ring-2 focus:ring-green-500 outline-none h-24 resize-none bg-gray-50" />
                    <Input value={newQ.caseImageUrl} onChange={(e) => setNewQ({...newQ, caseImageUrl: e.target.value})} placeholder="症例画像URL (Google Drive共有リンク可)" />
@@ -1298,7 +1299,7 @@ export default function App() {
                <textarea value={newQ.questionText} onChange={(e) => setNewQ({...newQ, questionText: e.target.value})} placeholder="問題文を入力..." className="w-full px-4 py-3 rounded-xl border-2 border-gray-200 focus:ring-2 focus:ring-green-500 outline-none h-24 resize-none bg-gray-50" />
                <Input value={newQ.imageUrl} onChange={(e) => setNewQ({...newQ, imageUrl: e.target.value})} placeholder="画像URL (Google Drive共有リンク可)" />
                
-               {newQ.type === 'input' ? (
+               {newQ.type === 'input' || newQ.type === 'series-input' ? (
                  <Input value={newQ.correctAnswerInput} onChange={(e) => setNewQ({...newQ, correctAnswerInput: e.target.value})} placeholder="正解 (複数の場合は | で区切る)" />
                ) : (
                  <div className="space-y-2">
@@ -1470,7 +1471,7 @@ export default function App() {
             <div className="flex items-center gap-2 mb-4">
               <span className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-1 rounded-md">{currentQ.category}</span>
               <span className="bg-gray-100 text-gray-600 text-xs font-bold px-2 py-1 rounded-md">
-                {getCurrentType() === 'multi' ? '複数選択' : getCurrentType() === 'input' ? '記述' : '単一選択'}
+                {getCurrentType().includes('multi') ? '複数選択' : getCurrentType().includes('input') ? '記述' : '単一選択'}
               </span>
             </div>
 
@@ -1525,7 +1526,7 @@ export default function App() {
             )}
 
             <div className="space-y-3">
-              {getCurrentType() === 'input' ? (
+              {getCurrentType().includes('input') ? (
                 <div className="my-8">
                   <Input 
                     value={textInput}
@@ -1631,7 +1632,7 @@ export default function App() {
               <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">正解</p>
               <p className="text-lg font-bold text-gray-900 break-words">
                 {/* inputなら / 区切り、それ以外は , 区切りで見やすく表示 (normalizedを使用) */}
-                {getCurrentType() === 'input' 
+                {getCurrentType().includes('input') 
                   ? currentQ.correctAnswer.split('|').join(' / ') 
                   : normalizedCorrectAnswers.join(', ')}
               </p>
@@ -1691,4 +1692,3 @@ export default function App() {
     </div>
   );
 }
-
