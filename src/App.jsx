@@ -67,8 +67,7 @@ const COURSES = [
   { id: 'qa-clinical-app', name: 'QA_臨床' },
 ];
 
-// --- Firebase Configuration (設定エリア) ---
-
+// --- Firebase Configuration ---
 const firebaseConfig = {
   apiKey: "AIzaSyBUaylHYEZNXL2jqojtILTaU0RrunJ6Rq0",
   authDomain: "medical-study-a0154.firebaseapp.com",
@@ -165,39 +164,32 @@ const groupAndShuffleQuestions = (questions) => {
   const singles = [];
 
   questions.forEach(q => {
-    // ★ 修正: typeが 'series' で始まるもの (series, series-multi, series-input) を連問として扱う
     const isSeries = q.type && q.type.startsWith('series');
     const match = q.customId ? q.customId.match(/^(\d{10})_(\d+)$/) : null;
     
     if (isSeries && match) {
-      const groupId = match[1]; // 2334412679
-      const order = parseInt(match[2], 10); // 1
+      const groupId = match[1]; 
+      const order = parseInt(match[2], 10); 
       
       if (!groups[groupId]) {
         groups[groupId] = [];
       }
       groups[groupId].push({ ...q, _order: order });
     } else {
-      // それ以外は単独扱い
       singles.push(q);
     }
   });
 
-  // 連問グループ内のソート (1 -> 2 -> 3)
   Object.values(groups).forEach(group => {
     group.sort((a, b) => a._order - b._order);
   });
 
-  // 単独問題を1つのグループとして扱う
   const mixedGroups = [
-    ...Object.values(groups), // 連問グループの配列
-    ...singles.map(q => [q])  // 単独問題をそれぞれ配列に入れたもの
+    ...Object.values(groups), 
+    ...singles.map(q => [q])  
   ];
 
-  // グループ単位でシャッフル
   const shuffledGroups = shuffleArray(mixedGroups);
-
-  // フラットな配列に戻す
   return shuffledGroups.flat();
 };
 
@@ -213,23 +205,6 @@ const isAnswerMatch = (selectedOption, correctAnswer) => {
   }
   return false;
 };
-
-// --- Sample Data ---
-const INITIAL_QUESTIONS = [
-  {
-    id: 'q1',
-    customId: '',
-    type: 'single',
-    category: 'サンプル',
-    questionText: 'これはサンプル問題です。選択肢1が正解です。',
-    imageUrl: '', 
-    options: ['選択肢1', '選択肢2', '選択肢3', '選択肢4', '選択肢5'],
-    correctAnswer: '選択肢1',
-    explanation: 'これはサンプル解説です。管理画面からCSVをインポートしてください。',
-    caseText: '',
-    caseImageUrl: ''
-  }
-];
 
 // --- Components ---
 const Button = ({ children, onClick, variant = 'primary', className = '', disabled = false, size = 'normal' }) => {
@@ -315,7 +290,6 @@ export default function App() {
   const [searchId, setSearchId] = useState('');
   const [statsTab, setStatsTab] = useState('progress');
 
-  // Admin State
   const [newQ, setNewQ] = useState({
     customId: '', type: 'single', category: '', questionText: '', imageUrl: '', options: ['', '', '', '', ''], correctAnswerInput: '', explanation: '', caseText: '', caseImageUrl: ''
   });
@@ -347,13 +321,11 @@ export default function App() {
     if (!currentQ || !Array.isArray(currentQ.options) || type.includes('input')) {
       return [];
     }
-    // single, multi, hyper はシャッフル
     return shuffleArray(currentQ.options);
   }, [currentQ]);
 
   const normalizedCorrectAnswers = useMemo(() => {
     if (!currentQ) return [];
-    
     let raws = Array.isArray(currentQ.correctAnswer) 
         ? currentQ.correctAnswer 
         : (typeof currentQ.correctAnswer === 'string' ? currentQ.correctAnswer.split('|') : [currentQ.correctAnswer]);
@@ -446,17 +418,10 @@ export default function App() {
       const qRef = collection(db, 'artifacts', targetAppId, 'public', 'data', 'questions');
       const qSnap = await getDocs(qRef);
       let loadedQuestions = [];
-      if (qSnap.empty) {
-        const seedPromises = INITIAL_QUESTIONS.map(q => 
-          setDoc(doc(db, 'artifacts', targetAppId, 'public', 'data', 'questions', q.id), q)
-        );
-        await Promise.all(seedPromises);
-        loadedQuestions = INITIAL_QUESTIONS;
-      } else {
+      if (!qSnap.empty) {
         loadedQuestions = qSnap.docs.map(doc => ({...doc.data(), id: doc.id}));
       }
       
-      // デフォルトソート
       loadedQuestions.sort((a, b) => {
         if (a.displayId && b.displayId) {
            const [aBatch, aNum] = a.displayId.split('_').map(Number);
@@ -479,17 +444,16 @@ export default function App() {
   };
 
   const downloadTemplate = () => {
-    // テンプレート (series/hyper用) - caseImageUrlを追加
-    const headers = "id,type,category,questionText,correctAnswer,imageUrl,caseText,caseImageUrl,explanation,option1,option2,option3,option4,option5";
-    const example1 = '2334412679_1,series,循環器,"連問の例",QT延長,"(問題画像)","79歳の男性...","(症例画像)","解説文",QT延長,洞性徐脈,心房細動,房室接合部調律,II度房室ブロック';
-    // テンプレート (single/multi/input用)
-    const example2 = ',single,一般,"通常問題",正解,,,,"",解説文,選択肢1,選択肢2,選択肢3,選択肢4,選択肢5';
-    const csvContent = "\uFEFF" + [headers, example1, example2].join("\n");
+    const headers = "id / type / 空欄,type(連問用),category,questionText,correctAnswer,imageUrl,caseText,caseImageUrl,explanation,option1,option2,option3,option4,option5";
+    const example1 = '1234567890_1,series,循環器,"連問の例",QT延長,"","79歳の男性...","","解説文",QT延長,洞性徐脈,心房細動,房室接合部調律,II度房室ブロック';
+    const example2 = 'single,,一般,"通常問題",正解,"",選択肢1,選択肢2,選択肢3,選択肢4,選択肢5,解説文';
+    const example3 = ',,一般,"hyper問題(多肢選択)",A|B,"",選択肢1,選択肢2,選択肢3,選択肢4,選択肢5,解説文,選択肢6,選択肢7';
+    const csvContent = "\uFEFF" + [headers, example1, example2, example3].join("\n");
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.setAttribute('download', 'question_template_v6.csv');
+    link.setAttribute('download', 'question_template.csv');
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -514,6 +478,7 @@ export default function App() {
       event.target.value = ''; 
       return;
     }
+
     const reader = new FileReader();
     reader.onload = async (e) => {
       try {
@@ -521,115 +486,113 @@ export default function App() {
         const text = e.target.result;
         const lines = text.split(/\r\n|\n/).filter(line => line.trim() !== '');
         
-        // ヘッダー行を解析 (series/hyper用)
-        const headers = lines[0].split(',').map(h => h.trim());
-        const idx = {
-          id: headers.indexOf('id'),
-          type: headers.indexOf('type'),
-          category: headers.indexOf('category'),
-          q: headers.indexOf('questionText'),
-          ans: headers.indexOf('correctAnswer'),
-          img: headers.indexOf('imageUrl'),
-          case: headers.indexOf('caseText'),
-          caseImg: headers.indexOf('caseImageUrl'), 
-          exp: headers.indexOf('explanation')
-        };
+        const cleanFirstLine = lines[0].replace(/^\uFEFF/, '');
+        const firstCellRaw = cleanFirstLine.split(',')[0].trim().toLowerCase();
+        
+        // 1行目がヘッダーかどうかの簡易判定
+        const hasHeader = cleanFirstLine.toLowerCase().includes('questiontext') || 
+                          firstCellRaw === 'id' || 
+                          firstCellRaw === 'type';
+        const startIdx = hasHeader ? 1 : 0;
 
-        const startIdx = 1;
         const newQuestions = [];
 
+        // 【最強ロジック】各行ごとにA列を解析して処理を分岐する
         for (let i = startIdx; i < lines.length; i++) {
           const cols = parseCSVLine(lines[i]);
-          if (cols.length < 4) continue;
+          if (cols.length < 3) continue;
 
-          let type = idx.type > -1 ? cols[idx.type] : cols[0];
-          type = (type || 'single').trim();
-
+          let type = '';
           let customId = '';
           let category = '';
           let questionText = '';
-          let correctAnswer = '';
+          let correctAnswerRaw = '';
           let imageUrl = '';
           let caseText = '';
           let caseImageUrl = '';
           let explanation = '';
           let options = [];
 
-          // ★ 修正: seriesで始まるもの、またはhyperの場合は拡張フォーマットとして扱う
-          if (type.startsWith('series') || type === 'hyper') {
-             // ★ 新形式
-             // ヘッダー依存
-             if (idx.type > -1) {
-               customId = idx.id > -1 ? cols[idx.id] : '';
-               category = idx.category > -1 ? cols[idx.category] : '';
-               questionText = idx.q > -1 ? cols[idx.q] : '';
-               correctAnswer = idx.ans > -1 ? cols[idx.ans] : '';
-               imageUrl = idx.img > -1 ? cols[idx.img] : '';
-               caseText = idx.case > -1 ? cols[idx.case] : '';
-               caseImageUrl = idx.caseImg > -1 ? cols[idx.caseImg] : '';
-               explanation = idx.exp > -1 ? cols[idx.exp] : '';
-               
-               // オプション収集
-               headers.forEach((h, colIndex) => {
-                 if (h.startsWith('option') && cols[colIndex]) {
-                   options.push(cols[colIndex]);
-                 }
-               });
-             } else {
-               // ヘッダーなしデフォルト順 (id, type, cat, q, ans, img, case, caseImg, exp, opts...)
-               [customId, , category, questionText, correctAnswer, imageUrl, caseText, caseImageUrl, explanation, ...options] = cols;
-             }
+          const aCol = cols[0] ? cols[0].trim() : '';
+          const aColLower = aCol.toLowerCase();
+
+          if (aCol === '') {
+            // パターン1: A列が空欄なら hyper (多肢選択)
+            type = 'hyper';
+            category = cols[1] ? cols[1].trim() : '';
+            questionText = cols[2] ? cols[2].trim() : '';
+            correctAnswerRaw = cols[3] ? cols[3].trim() : '';
+            imageUrl = cols[4] ? cols[4].trim() : '';
+            
+            for (let k = 5; k <= 9; k++) {
+              if (cols[k] && cols[k].trim() !== '') options.push(cols[k].trim());
+            }
+            explanation = cols[10] ? cols[10].trim() : '';
+            
+            for (let k = 11; k < cols.length; k++) {
+              if (cols[k] && cols[k].trim() !== '') options.push(cols[k].trim());
+            }
+
+          } else if (aColLower === 'single' || aColLower === 'multi' || aColLower === 'input') {
+            // パターン2: A列が single, multi, input なら 旧形式に従う
+            type = aColLower;
+            category = cols[1] ? cols[1].trim() : '';
+            questionText = cols[2] ? cols[2].trim() : '';
+            correctAnswerRaw = cols[3] ? cols[3].trim() : '';
+            imageUrl = cols[4] ? cols[4].trim() : '';
+            
+            if (!type.includes('input')) {
+              for (let k = 5; k <= 9; k++) {
+                if (cols[k] && cols[k].trim() !== '') options.push(cols[k].trim());
+              }
+            }
+            explanation = cols[10] ? cols[10].trim() : '';
 
           } else {
-             // ★ 旧形式 (single / multi / input)
-             // 厳密な列固定: 0:type, 1:category, 2:q, 3:ans, 4:img, 5~9:options, 10:exp
-             
-             type = cols[0];
-             category = cols[1] || '';
-             questionText = cols[2] || '';
-             correctAnswer = cols[3] || '';
-             imageUrl = cols[4] || '';
-             
-             // options (5-9) 固定5個
-             if (!type.includes('input')) {
-               for (let k = 5; k <= 9; k++) {
-                 if (cols[k]) options.push(cols[k]);
-               }
-             } else {
-               options = [];
-             }
-             
-             explanation = cols[10] || '';
-             caseText = ''; // 存在しない
-             caseImageUrl = ''; // 存在しない
-             customId = ''; // 存在しない
+            // パターン3: A列にIDがあるなら series等の新形式
+            customId = aCol;
+            type = cols[1] ? cols[1].trim().toLowerCase() : 'series';
+            if (!type.startsWith('series')) type = 'series'; // 保険
+            
+            category = cols[2] ? cols[2].trim() : '';
+            questionText = cols[3] ? cols[3].trim() : '';
+            correctAnswerRaw = cols[4] ? cols[4].trim() : '';
+            imageUrl = cols[5] ? cols[5].trim() : '';
+            caseText = cols[6] ? cols[6].trim() : '';
+            caseImageUrl = cols[7] ? cols[7].trim() : '';
+            explanation = cols[8] ? cols[8].trim() : '';
+            
+            if (!type.includes('input')) {
+              for (let k = 9; k < cols.length; k++) {
+                if (cols[k] && cols[k].trim() !== '') options.push(cols[k].trim());
+              }
+            }
           }
           
-          // クリーニング
-          options = options.filter(o => o && o.trim() !== '');
+          // 正解フォーマットの整形 (multi, hyper)
           if (type && (type.includes('multi') || type === 'hyper')) {
-             if (correctAnswer.includes('|')) {
-               correctAnswer = correctAnswer.split('|').map(s => s.trim());
-             } else {
-               correctAnswer = [correctAnswer.trim()];
-             }
+            if (correctAnswerRaw.includes('|')) {
+              correctAnswerRaw = correctAnswerRaw.split('|').map(s => s.trim());
+            } else {
+              correctAnswerRaw = [correctAnswerRaw.trim()];
+            }
           }
-          
+
           const displayId = `${uploadBatchNum}_${i}`; 
 
           newQuestions.push({
-            customId: customId ? customId.trim() : '', 
-            type: type,
-            category: category ? category.trim() : '',
-            questionText: questionText ? questionText.trim() : '',
-            imageUrl: imageUrl ? imageUrl.trim() : '', 
-            options: (type && type.includes('input')) ? [] : options,
-            correctAnswer,
-            explanation: explanation ? explanation.trim() : '',
-            caseText: caseText ? caseText.trim() : '', 
-            caseImageUrl: caseImageUrl ? caseImageUrl.trim() : '',
+            customId, 
+            type,
+            category,
+            questionText,
+            imageUrl, 
+            options,
+            correctAnswer: correctAnswerRaw,
+            explanation,
+            caseText, 
+            caseImageUrl,
             createdAt: new Date().toISOString(),
-            displayId: displayId
+            displayId
           });
         }
 
@@ -949,7 +912,7 @@ export default function App() {
     }
     let finalCorrectAnswer;
     const cleanOptions = newQ.options.filter(o => o.trim() !== '');
-    if (newQ.type === 'input') {
+    if (newQ.type.includes('input')) {
       if (!newQ.correctAnswerInput) { alert('正解を入力'); return; }
       finalCorrectAnswer = newQ.correctAnswerInput;
     } else {
@@ -963,7 +926,7 @@ export default function App() {
       category: newQ.category,
       questionText: newQ.questionText,
       imageUrl: newQ.imageUrl || '',
-      options: newQ.type === 'input' ? [] : cleanOptions,
+      options: newQ.type.includes('input') ? [] : cleanOptions,
       correctAnswer: finalCorrectAnswer,
       explanation: newQ.explanation,
       caseText: newQ.caseText || '', 
@@ -1272,7 +1235,9 @@ export default function App() {
                    <option value="multi">複数選択</option>
                    <option value="input">記述式</option>
                    <option value="series">連問 (Series)</option>
-                   <option value="hyper">多選択肢 (Hyper)</option>
+                   <option value="series-multi">連問-複数選択 (Series-Multi)</option>
+                   <option value="series-input">連問-記述式 (Series-Input)</option>
+                   <option value="hyper">多肢選択 (Hyper)</option>
                  </select>
                  <Input value={newQ.category} onChange={(e) => setNewQ({...newQ, category: e.target.value})} placeholder="カテゴリ (例: 循環器)" />
                </div>
@@ -1299,7 +1264,7 @@ export default function App() {
                <textarea value={newQ.questionText} onChange={(e) => setNewQ({...newQ, questionText: e.target.value})} placeholder="問題文を入力..." className="w-full px-4 py-3 rounded-xl border-2 border-gray-200 focus:ring-2 focus:ring-green-500 outline-none h-24 resize-none bg-gray-50" />
                <Input value={newQ.imageUrl} onChange={(e) => setNewQ({...newQ, imageUrl: e.target.value})} placeholder="画像URL (Google Drive共有リンク可)" />
                
-               {newQ.type === 'input' || newQ.type === 'series-input' ? (
+               {newQ.type.includes('input') ? (
                  <Input value={newQ.correctAnswerInput} onChange={(e) => setNewQ({...newQ, correctAnswerInput: e.target.value})} placeholder="正解 (複数の場合は | で区切る)" />
                ) : (
                  <div className="space-y-2">
@@ -1631,7 +1596,6 @@ export default function App() {
             <div className="bg-white/60 rounded-xl p-4 mb-4">
               <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">正解</p>
               <p className="text-lg font-bold text-gray-900 break-words">
-                {/* inputなら / 区切り、それ以外は , 区切りで見やすく表示 (normalizedを使用) */}
                 {getCurrentType().includes('input') 
                   ? currentQ.correctAnswer.split('|').join(' / ') 
                   : normalizedCorrectAnswers.join(', ')}
