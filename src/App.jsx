@@ -206,6 +206,18 @@ const isAnswerMatch = (selectedOption, correctAnswer) => {
   return false;
 };
 
+// --- Helper: Recent Error Rate Calculator ---
+const getRecentErrorRate = (hist) => {
+  if (!hist) return 0;
+  if (hist.recentResults && hist.recentResults.length > 0) {
+    // recentResultsは true(正解) / false(不正解) の配列
+    const wrongs = hist.recentResults.filter(r => r === false).length;
+    return wrongs / hist.recentResults.length;
+  }
+  // 過去のデータで recentResults が無い場合は全体の誤答率を使用
+  return hist.attemptCount > 0 ? (hist.wrongCount / hist.attemptCount) : 0;
+};
+
 // --- Components ---
 const Button = ({ children, onClick, variant = 'primary', className = '', disabled = false, size = 'normal' }) => {
   const baseStyle = "rounded-xl font-bold transition-all duration-200 flex items-center justify-center gap-2 shadow-sm active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed";
@@ -646,27 +658,21 @@ export default function App() {
     let targetQuestions = [...allQuestions];
     
     if (selectedMode === 'review') {
+      // 復習モード：不正解もしくは不安のみ抽出し、直近3回の誤答率で降順ソート
       targetQuestions = targetQuestions.filter(q => {
         const hist = userHistory[q.id];
         if (!hist) return false; 
         return hist.isCorrect === false || hist.isUnsure === true;
       });
       targetQuestions.sort((a, b) => {
-        const histA = userHistory[a.id];
-        const histB = userHistory[b.id];
-        const rateA = (histA.attemptCount > 0) ? (histA.wrongCount / histA.attemptCount) : 0;
-        const rateB = (histB.attemptCount > 0) ? (histB.wrongCount / histB.attemptCount) : 0;
+        const rateA = getRecentErrorRate(userHistory[a.id]);
+        const rateB = getRecentErrorRate(userHistory[b.id]);
         if (Math.abs(rateA - rateB) > 0.0001) return rateB - rateA;
-        return histB.wrongCount - histA.wrongCount;
+        return (userHistory[b.id]?.wrongCount || 0) - (userHistory[a.id]?.wrongCount || 0); // 同率なら総誤答数
       });
     } else {
-      const notAnswered = targetQuestions.filter(q => !userHistory[q.id]);
-      const answered = targetQuestions.filter(q => userHistory[q.id]);
-      
-      const shuffledNotAnswered = groupAndShuffleQuestions(notAnswered);
-      const shuffledAnswered = groupAndShuffleQuestions(answered);
-      
-      targetQuestions = [...shuffledNotAnswered, ...shuffledAnswered];
+      // ① 全問演習：完全ランダム（連問ルールは維持）
+      targetQuestions = groupAndShuffleQuestions(targetQuestions);
     }
 
     if (targetQuestions.length === 0) {
@@ -699,14 +705,25 @@ export default function App() {
     }
     
     if (isReview) {
+        // ④ 条件指定復習モード：不正解もしくは不安のみ抽出し、直近3回の誤答率で降順ソート
         targets = targets.filter(q => {
             const hist = userHistory[q.id];
             if (!hist) return false; 
             return hist.isCorrect === false || hist.isUnsure === true;
         });
-        targets.sort((a, b) => (userHistory[b.id]?.wrongCount || 0) - (userHistory[a.id]?.wrongCount || 0));
+        targets.sort((a, b) => {
+            const rateA = getRecentErrorRate(userHistory[a.id]);
+            const rateB = getRecentErrorRate(userHistory[b.id]);
+            if (Math.abs(rateA - rateB) > 0.0001) return rateB - rateA;
+            return (userHistory[b.id]?.wrongCount || 0) - (userHistory[a.id]?.wrongCount || 0);
+        });
     } else {
-        targets = groupAndShuffleQuestions(targets);
+        // ③ 条件指定ランダム：未回答優先、それぞれをランダムシャッフル
+        const notAnswered = targets.filter(q => !userHistory[q.id]);
+        const answered = targets.filter(q => userHistory[q.id]);
+        const shuffledNotAnswered = groupAndShuffleQuestions(notAnswered);
+        const shuffledAnswered = groupAndShuffleQuestions(answered);
+        targets = [...shuffledNotAnswered, ...shuffledAnswered];
     }
     
     if (targets.length === 0) {
@@ -789,6 +806,12 @@ export default function App() {
       const currentAttemptCount = prevHistory.attemptCount || 0;
       const newWrongCount = isCorrect ? currentWrongCount : currentWrongCount + 1;
       const newAttemptCount = currentAttemptCount + 1;
+
+      // 直近の正解・不正解を配列で管理（最大3件）
+      const currentRecent = prevHistory.recentResults || [];
+      const newRecent = [...currentRecent, isCorrect];
+      if (newRecent.length > 3) newRecent.shift();
+
       const resultData = {
         ...prevHistory,
         isCorrect,
@@ -796,7 +819,8 @@ export default function App() {
         lastAnswer: type.includes('input') ? textInput : selectedOptions,
         wrongCount: newWrongCount,
         attemptCount: newAttemptCount,
-        isUnsure: false 
+        isUnsure: false, 
+        recentResults: newRecent
       };
       setUserHistory(prev => ({ ...prev, [currentQ.id]: resultData }));
       await setDoc(doc(db, 'artifacts', currentAppId, 'users', user.uid, 'history', currentQ.id), resultData);
@@ -1101,7 +1125,7 @@ export default function App() {
                 </div>
                 <div className="text-left">
                   <h3 className="font-bold text-gray-800 text-lg">全問演習</h3>
-                  <p className="text-sm text-gray-500 font-medium">未回答を優先して出題</p>
+                  <p className="text-sm text-gray-500 font-medium">完全ランダムに出題</p>
                 </div>
               </div>
               <ChevronRight className="text-gray-300 group-hover:text-blue-600" size={24} />
@@ -1113,7 +1137,7 @@ export default function App() {
                 </div>
                 <div className="text-left">
                   <h3 className="font-bold text-gray-800 text-lg">復習モード</h3>
-                  <p className="text-sm text-gray-500 font-medium">誤答・不安な問題のみ出題</p>
+                  <p className="text-sm text-gray-500 font-medium">直近の誤答率が高い順に出題</p>
                 </div>
               </div>
               <ChevronRight className="text-gray-300 group-hover:text-amber-600" size={24} />
