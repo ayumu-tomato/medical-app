@@ -52,7 +52,9 @@ import {
   BarChart2,
   FileText as CaseIcon,
   Minus,
-  Link as LinkIcon
+  Link as LinkIcon,
+  EyeOff,
+  Target
 } from 'lucide-react';
 
 // --- Configuration ---
@@ -62,9 +64,14 @@ const ADMIN_EMAIL = "2004ayumu0417@gmail.com"; // 管理者メールアドレス
 const COURSES = [
   { id: 'med-study-app', name: '試験対策' },
   { id: 'cbt-basic-app', name: 'CBT対策_基礎' },
-  { id: 'cbt-clinical-app', name: 'CBT対策_臨床' },
+  { id: 'cbt-clinical-app1', name: 'CBT対策_臨床1' },
+  { id: 'cbt-clinical-app2', name: 'CBT対策_臨床2' },
+  { id: 'cbt-clinical-app3', name: 'CBT対策_臨床3' },
   { id: 'qa-basic-app', name: 'QA_基礎' },
-  { id: 'qa-clinical-app', name: 'QA_臨床' },
+  { id: 'qa-clinical-app1', name: 'QA_臨床1' },
+  { id: 'qa-clinical-app2', name: 'QA_臨床2' }, 
+  { id: 'qa-clinical-app3', name: 'QA_臨床3' },
+  { id: 'qa-clinical-app4', name: 'QA_臨床4' },
 ];
 
 // --- Firebase Configuration ---
@@ -159,7 +166,8 @@ const shuffleArray = (array) => {
 };
 
 // --- Helper: Group and Shuffle Logic (For Linked Questions) ---
-const groupAndShuffleQuestions = (questions) => {
+// limit引数を追加。指定された問題数（グループ単位なので多少ブレる）だけを抽出します。
+const groupAndShuffleQuestions = (questions, limit = null) => {
   const groups = {};
   const singles = [];
 
@@ -190,6 +198,17 @@ const groupAndShuffleQuestions = (questions) => {
   ];
 
   const shuffledGroups = shuffleArray(mixedGroups);
+
+  // 上限が設定されている場合、グループ単位で追加して上限を超えたら終了
+  if (limit) {
+    const limitedQuestions = [];
+    for (const group of shuffledGroups) {
+      limitedQuestions.push(...group);
+      if (limitedQuestions.length >= limit) break;
+    }
+    return limitedQuestions;
+  }
+
   return shuffledGroups.flat();
 };
 
@@ -210,11 +229,9 @@ const isAnswerMatch = (selectedOption, correctAnswer) => {
 const getRecentErrorRate = (hist) => {
   if (!hist) return 0;
   if (hist.recentResults && hist.recentResults.length > 0) {
-    // recentResultsは true(正解) / false(不正解) の配列
     const wrongs = hist.recentResults.filter(r => r === false).length;
     return wrongs / hist.recentResults.length;
   }
-  // 過去のデータで recentResults が無い場合は全体の誤答率を使用
   return hist.attemptCount > 0 ? (hist.wrongCount / hist.attemptCount) : 0;
 };
 
@@ -294,6 +311,7 @@ export default function App() {
 
   const [isUnsure, setIsUnsure] = useState(false);
   const [sessionStats, setSessionStats] = useState({ correct: 0, total: 0 }); 
+  const [sessionResults, setSessionResults] = useState([]); // セッションの解答記録（分野別正答率用）
   const [prevAttempt, setPrevAttempt] = useState(null); 
   const [imageModalUrl, setImageModalUrl] = useState(null);
 
@@ -509,7 +527,6 @@ export default function App() {
 
         const newQuestions = [];
 
-        // 【最強ロジック】各行ごとにA列を解析して処理を分岐する
         for (let i = startIdx; i < lines.length; i++) {
           const cols = parseCSVLine(lines[i]);
           if (cols.length < 3) continue;
@@ -529,7 +546,6 @@ export default function App() {
           const aColLower = aCol.toLowerCase();
 
           if (aCol === '') {
-            // パターン1: A列が空欄なら hyper (多肢選択)
             type = 'hyper';
             category = cols[1] ? cols[1].trim() : '';
             questionText = cols[2] ? cols[2].trim() : '';
@@ -546,7 +562,6 @@ export default function App() {
             }
 
           } else if (aColLower === 'single' || aColLower === 'multi' || aColLower === 'input') {
-            // パターン2: A列が single, multi, input なら 旧形式に従う
             type = aColLower;
             category = cols[1] ? cols[1].trim() : '';
             questionText = cols[2] ? cols[2].trim() : '';
@@ -561,7 +576,6 @@ export default function App() {
             explanation = cols[10] ? cols[10].trim() : '';
 
           } else {
-            // パターン3: A列にIDがあるなら series等の新形式
             customId = aCol;
             type = cols[1] ? cols[1].trim().toLowerCase() : 'series';
             if (!type.startsWith('series')) type = 'series'; // 保険
@@ -581,7 +595,6 @@ export default function App() {
             }
           }
           
-          // 正解フォーマットの整形 (multi, hyper)
           if (type && (type.includes('multi') || type === 'hyper')) {
             if (correctAnswerRaw.includes('|')) {
               correctAnswerRaw = correctAnswerRaw.split('|').map(s => s.trim());
@@ -658,7 +671,6 @@ export default function App() {
     let targetQuestions = [...allQuestions];
     
     if (selectedMode === 'review') {
-      // 復習モード：不正解もしくは不安のみ抽出し、直近3回の誤答率で降順ソート
       targetQuestions = targetQuestions.filter(q => {
         const hist = userHistory[q.id];
         if (!hist) return false; 
@@ -670,8 +682,11 @@ export default function App() {
         if (Math.abs(rateA - rateB) > 0.0001) return rateB - rateA;
         return (userHistory[b.id]?.wrongCount || 0) - (userHistory[a.id]?.wrongCount || 0); // 同率なら総誤答数
       });
+    } else if (selectedMode === 'random-20') {
+      // 全問からランダムに20問抽出（連問の塊を保持）
+      targetQuestions = groupAndShuffleQuestions(targetQuestions, 20);
     } else {
-      // ① 全問演習：完全ランダム（連問ルールは維持）
+      // 全問演習
       targetQuestions = groupAndShuffleQuestions(targetQuestions);
     }
 
@@ -684,6 +699,7 @@ export default function App() {
     setCurrentQuestionIndex(0);
     resetQuestionState();
     setSessionStats({ correct: 0, total: targetQuestions.length });
+    setSessionResults([]); // セッション結果のリセット
     setView('quiz');
   };
 
@@ -705,7 +721,6 @@ export default function App() {
     }
     
     if (isReview) {
-        // ④ 条件指定復習モード：不正解もしくは不安のみ抽出し、直近3回の誤答率で降順ソート
         targets = targets.filter(q => {
             const hist = userHistory[q.id];
             if (!hist) return false; 
@@ -718,7 +733,6 @@ export default function App() {
             return (userHistory[b.id]?.wrongCount || 0) - (userHistory[a.id]?.wrongCount || 0);
         });
     } else {
-        // ③ 条件指定ランダム：未回答優先、それぞれをランダムシャッフル
         const notAnswered = targets.filter(q => !userHistory[q.id]);
         const answered = targets.filter(q => userHistory[q.id]);
         const shuffledNotAnswered = groupAndShuffleQuestions(notAnswered);
@@ -734,6 +748,7 @@ export default function App() {
     setCurrentQuestionIndex(0);
     resetQuestionState();
     setSessionStats({ correct: 0, total: targets.length }); 
+    setSessionResults([]); // セッション結果のリセット
     setMode(isReview ? 'custom-review' : 'custom'); 
     setView('quiz');
   };
@@ -750,6 +765,7 @@ export default function App() {
     setCurrentQuestionIndex(0);
     resetQuestionState();
     setSessionStats({ correct: 0, total: 1 });
+    setSessionResults([]); // セッション結果のリセット
     setView('quiz');
   };
 
@@ -796,9 +812,14 @@ export default function App() {
     } else {
       isCorrect = isAnswerMatch(selectedOptions[0], normalizedCorrectAnswers[0]);
     }
+
     if (isCorrect) {
         setSessionStats(prev => ({ ...prev, correct: prev.correct + 1 }));
     }
+
+    // 今のセッションのカテゴリ別正答率記録用
+    setSessionResults(prev => [...prev, { category: currentQ.category || '未分類', isCorrect }]);
+
     if (user) {
       const prevHistory = userHistory[currentQ.id] || {};
       setPrevAttempt(prevHistory.timestamp ? prevHistory : null);
@@ -807,7 +828,6 @@ export default function App() {
       const newWrongCount = isCorrect ? currentWrongCount : currentWrongCount + 1;
       const newAttemptCount = currentAttemptCount + 1;
 
-      // 直近の正解・不正解を配列で管理（最大3件）
       const currentRecent = prevHistory.recentResults || [];
       const newRecent = [...currentRecent, isCorrect];
       if (newRecent.length > 3) newRecent.shift();
@@ -1130,6 +1150,21 @@ export default function App() {
               </div>
               <ChevronRight className="text-gray-300 group-hover:text-blue-600" size={24} />
             </button>
+
+            {/* 新規追加：ランダム20問テスト */}
+            <button onClick={() => startQuiz('random-20')} className="bg-white p-6 rounded-2xl shadow-sm border-2 border-gray-100 flex items-center justify-between hover:border-emerald-200 hover:shadow-md transition-all group active:scale-[0.98]">
+              <div className="flex items-center gap-5">
+                <div className="bg-emerald-100 p-4 rounded-xl text-emerald-600">
+                  <Target size={28} />
+                </div>
+                <div className="text-left">
+                  <h3 className="font-bold text-gray-800 text-lg">ランダム20問テスト</h3>
+                  <p className="text-sm text-gray-500 font-medium">実力試し！全問からランダムに出題</p>
+                </div>
+              </div>
+              <ChevronRight className="text-gray-300 group-hover:text-emerald-600" size={24} />
+            </button>
+
             <button onClick={() => startQuiz('review')} disabled={wrongCount === 0} className="bg-white p-6 rounded-2xl shadow-sm border-2 border-gray-100 flex items-center justify-between hover:border-amber-200 hover:shadow-md transition-all group disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.98]">
               <div className="flex items-center gap-5">
                 <div className="bg-amber-100 p-4 rounded-xl text-amber-600">
@@ -1207,9 +1242,27 @@ export default function App() {
 
   if (view === 'result') {
     const correctRate = Math.round((sessionStats.correct / sessionStats.total) * 100) || 0;
+    
+    // セッション内の分野別正答率を計算
+    const sessionCategoryStats = (() => {
+      const stats = {};
+      sessionResults.forEach(r => {
+        const cat = r.category;
+        if (!stats[cat]) stats[cat] = { total: 0, correct: 0 };
+        stats[cat].total++;
+        if (r.isCorrect) stats[cat].correct++;
+      });
+      return Object.entries(stats).map(([name, data]) => ({
+        name,
+        total: data.total,
+        correct: data.correct,
+        rate: Math.round((data.correct / data.total) * 100)
+      })).sort((a, b) => b.rate - a.rate);
+    })();
+
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-        <div className="bg-white p-8 rounded-3xl shadow-xl w-full max-w-md text-center space-y-8">
+        <div className="bg-white p-8 rounded-3xl shadow-xl w-full max-w-md text-center space-y-8 overflow-y-auto max-h-[90vh]">
           <div className="bg-blue-100 w-20 h-20 rounded-full flex items-center justify-center mx-auto">
             <Award className="text-blue-600 w-10 h-10" />
           </div>
@@ -1227,6 +1280,29 @@ export default function App() {
               <p className="text-3xl font-bold text-blue-600">{correctRate}%</p>
             </div>
           </div>
+
+          {/* 新規追加：分野別の正答率 */}
+          {sessionCategoryStats.length > 0 && (
+            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 text-left">
+              <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2">
+                <PieChart size={18} className="text-blue-500"/> 分野別正答率
+              </h3>
+              <div className="space-y-4">
+                {sessionCategoryStats.map(stat => (
+                  <div key={stat.name} className="flex flex-col gap-1">
+                    <div className="flex justify-between items-center text-sm">
+                      <span className="font-bold text-gray-600 truncate">{stat.name}</span>
+                      <span className="font-bold text-blue-600 shrink-0">{stat.rate}% <span className="text-xs text-gray-400 ml-1 font-normal">({stat.correct}/{stat.total})</span></span>
+                    </div>
+                    <div className="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden">
+                      <div className="bg-blue-500 h-full rounded-full transition-all" style={{ width: `${stat.rate}%` }}></div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           <Button onClick={() => setView('dashboard')} size="large" className="w-full">
             <Home size={20} /> ダッシュボードへ戻る
           </Button>
@@ -1458,7 +1534,14 @@ export default function App() {
         {currentQ && (
           <div className="bg-white rounded-3xl shadow-sm p-6 mb-6">
             <div className="flex items-center gap-2 mb-4">
-              <span className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-1 rounded-md">{currentQ.category}</span>
+              {/* 解答前はカテゴリを隠す */}
+              {showExplanation ? (
+                <span className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-1 rounded-md animate-in fade-in">{currentQ.category}</span>
+              ) : (
+                <span className="bg-gray-100 text-gray-400 text-xs font-bold px-2 py-1 rounded-md flex items-center gap-1">
+                  <EyeOff size={12} /> カテゴリ非表示
+                </span>
+              )}
               <span className="bg-gray-100 text-gray-600 text-xs font-bold px-2 py-1 rounded-md">
                 {getCurrentType().includes('multi') ? '複数選択' : getCurrentType().includes('input') ? '記述' : '単一選択'}
               </span>
