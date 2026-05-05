@@ -166,7 +166,6 @@ const shuffleArray = (array) => {
 };
 
 // --- Helper: Group and Shuffle Logic (For Linked Questions) ---
-// limit引数を追加。指定された問題数（グループ単位なので多少ブレる）だけを抽出します。
 const groupAndShuffleQuestions = (questions, limit = null) => {
   const groups = {};
   const singles = [];
@@ -199,7 +198,6 @@ const groupAndShuffleQuestions = (questions, limit = null) => {
 
   const shuffledGroups = shuffleArray(mixedGroups);
 
-  // 上限が設定されている場合、グループ単位で追加して上限を超えたら終了
   if (limit) {
     const limitedQuestions = [];
     for (const group of shuffledGroups) {
@@ -311,7 +309,7 @@ export default function App() {
 
   const [isUnsure, setIsUnsure] = useState(false);
   const [sessionStats, setSessionStats] = useState({ correct: 0, total: 0 }); 
-  const [sessionResults, setSessionResults] = useState([]); // セッションの解答記録（分野別正答率用）
+  const [sessionResults, setSessionResults] = useState([]); 
   const [prevAttempt, setPrevAttempt] = useState(null); 
   const [imageModalUrl, setImageModalUrl] = useState(null);
 
@@ -519,7 +517,6 @@ export default function App() {
         const cleanFirstLine = lines[0].replace(/^\uFEFF/, '');
         const firstCellRaw = cleanFirstLine.split(',')[0].trim().toLowerCase();
         
-        // 1行目がヘッダーかどうかの簡易判定
         const hasHeader = cleanFirstLine.toLowerCase().includes('questiontext') || 
                           firstCellRaw === 'id' || 
                           firstCellRaw === 'type';
@@ -578,7 +575,7 @@ export default function App() {
           } else {
             customId = aCol;
             type = cols[1] ? cols[1].trim().toLowerCase() : 'series';
-            if (!type.startsWith('series')) type = 'series'; // 保険
+            if (!type.startsWith('series')) type = 'series'; 
             
             category = cols[2] ? cols[2].trim() : '';
             questionText = cols[3] ? cols[3].trim() : '';
@@ -680,13 +677,11 @@ export default function App() {
         const rateA = getRecentErrorRate(userHistory[a.id]);
         const rateB = getRecentErrorRate(userHistory[b.id]);
         if (Math.abs(rateA - rateB) > 0.0001) return rateB - rateA;
-        return (userHistory[b.id]?.wrongCount || 0) - (userHistory[a.id]?.wrongCount || 0); // 同率なら総誤答数
+        return (userHistory[b.id]?.wrongCount || 0) - (userHistory[a.id]?.wrongCount || 0); 
       });
     } else if (selectedMode === 'random-20') {
-      // 全問からランダムに20問抽出（連問の塊を保持）
       targetQuestions = groupAndShuffleQuestions(targetQuestions, 20);
     } else {
-      // 全問演習
       targetQuestions = groupAndShuffleQuestions(targetQuestions);
     }
 
@@ -699,7 +694,7 @@ export default function App() {
     setCurrentQuestionIndex(0);
     resetQuestionState();
     setSessionStats({ correct: 0, total: targetQuestions.length });
-    setSessionResults([]); // セッション結果のリセット
+    setSessionResults([]); 
     setView('quiz');
   };
 
@@ -748,7 +743,7 @@ export default function App() {
     setCurrentQuestionIndex(0);
     resetQuestionState();
     setSessionStats({ correct: 0, total: targets.length }); 
-    setSessionResults([]); // セッション結果のリセット
+    setSessionResults([]); 
     setMode(isReview ? 'custom-review' : 'custom'); 
     setView('quiz');
   };
@@ -765,7 +760,7 @@ export default function App() {
     setCurrentQuestionIndex(0);
     resetQuestionState();
     setSessionStats({ correct: 0, total: 1 });
-    setSessionResults([]); // セッション結果のリセット
+    setSessionResults([]); 
     setView('quiz');
   };
 
@@ -817,7 +812,6 @@ export default function App() {
         setSessionStats(prev => ({ ...prev, correct: prev.correct + 1 }));
     }
 
-    // 今のセッションのカテゴリ別正答率記録用
     setSessionResults(prev => [...prev, { category: currentQ.category || '未分類', isCorrect }]);
 
     if (user) {
@@ -1151,7 +1145,6 @@ export default function App() {
               <ChevronRight className="text-gray-300 group-hover:text-blue-600" size={24} />
             </button>
 
-            {/* 新規追加：ランダム20問テスト */}
             <button onClick={() => startQuiz('random-20')} className="bg-white p-6 rounded-2xl shadow-sm border-2 border-gray-100 flex items-center justify-between hover:border-emerald-200 hover:shadow-md transition-all group active:scale-[0.98]">
               <div className="flex items-center gap-5">
                 <div className="bg-emerald-100 p-4 rounded-xl text-emerald-600">
@@ -1243,7 +1236,6 @@ export default function App() {
   if (view === 'result') {
     const correctRate = Math.round((sessionStats.correct / sessionStats.total) * 100) || 0;
     
-    // セッション内の分野別正答率を計算
     const sessionCategoryStats = (() => {
       const stats = {};
       sessionResults.forEach(r => {
@@ -1281,7 +1273,6 @@ export default function App() {
             </div>
           </div>
 
-          {/* 新規追加：分野別の正答率 */}
           {sessionCategoryStats.length > 0 && (
             <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 text-left">
               <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2">
@@ -1504,6 +1495,9 @@ export default function App() {
     }
   }
 
+  // --- 追加：ランダム20問テストのときだけ、解答前はメタ情報を隠す ---
+  const hideMeta = mode === 'random-20' && !showExplanation;
+
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
       <div className="bg-white px-4 py-4 shadow-sm flex justify-between items-center sticky top-0 z-20 safe-area-top">
@@ -1512,7 +1506,16 @@ export default function App() {
         </button>
         <div className="font-bold text-gray-700 flex flex-col items-center leading-tight">
           <div className="flex items-center gap-2 mb-0.5">
-             <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded">No.{currentQ?.displayId || (currentQuestionIndex + 1)}</span>
+             {/* ランダム20問のときだけNoを隠す */}
+             {hideMeta ? (
+               <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded flex items-center gap-1">
+                 <EyeOff size={10} /> No.非表示
+               </span>
+             ) : (
+               <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded animate-in fade-in">
+                 No.{currentQ?.displayId || (currentQuestionIndex + 1)}
+               </span>
+             )}
           </div>
           <span className="text-lg">{currentQuestionIndex + 1} <span className="text-sm text-gray-400">/ {questions.length}</span></span>
           <div className="flex items-center gap-3 mt-1 text-xs text-gray-500 bg-blue-50 px-3 py-1 rounded-full border border-blue-100">
@@ -1534,13 +1537,13 @@ export default function App() {
         {currentQ && (
           <div className="bg-white rounded-3xl shadow-sm p-6 mb-6">
             <div className="flex items-center gap-2 mb-4">
-              {/* 解答前はカテゴリを隠す */}
-              {showExplanation ? (
-                <span className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-1 rounded-md animate-in fade-in">{currentQ.category}</span>
-              ) : (
+              {/* ランダム20問のときだけカテゴリを隠す */}
+              {hideMeta ? (
                 <span className="bg-gray-100 text-gray-400 text-xs font-bold px-2 py-1 rounded-md flex items-center gap-1">
                   <EyeOff size={12} /> カテゴリ非表示
                 </span>
+              ) : (
+                <span className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-1 rounded-md animate-in fade-in">{currentQ.category}</span>
               )}
               <span className="bg-gray-100 text-gray-600 text-xs font-bold px-2 py-1 rounded-md">
                 {getCurrentType().includes('multi') ? '複数選択' : getCurrentType().includes('input') ? '記述' : '単一選択'}
