@@ -75,6 +75,7 @@ const COURSES = [
   { id: 'qa-clinical-app2', name: 'QA_臨床2' }, 
   { id: 'qa-clinical-app3', name: 'QA_臨床3' },
   { id: 'qa-clinical-app4', name: 'QA_臨床4' },
+  { id: 'custom-cross-course', name: 'カスタム (全コース横断)' }
 ];
 
 const getCourseName = (id) => {
