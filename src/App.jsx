@@ -174,7 +174,7 @@ const shuffleArray = (array) => {
   return newArray;
 };
 
-// --- Helper: Group and Shuffle Logic (For Linked Questions) ---
+// --- Helper: Group and Shuffle Logic ---
 const groupAndShuffleQuestions = (questions, limit = null) => {
   const groups = {};
   const singles = [];
@@ -327,7 +327,7 @@ export default function App() {
   const [searchId, setSearchId] = useState('');
   const [statsTab, setStatsTab] = useState('progress');
   
-  // --- カスタム問題設定のステート ---
+  // カスタム問題設定のステート
   const [savedCustomConfigs, setSavedCustomConfigs] = useState(() => {
     const saved = localStorage.getItem('med-app-custom-configs');
     return saved ? JSON.parse(saved) : [];
@@ -336,12 +336,11 @@ export default function App() {
     return localStorage.getItem('med-app-active-custom-config') || '';
   });
   const [showSettingsModal, setShowSettingsModal] = useState(false);
-  const [settingsViewMode, setSettingsViewMode] = useState('list'); // 'list' | 'edit'
+  const [settingsViewMode, setSettingsViewMode] = useState('list');
   
-  // 編集中のカスタム設定ステート
   const [editConfigId, setEditConfigId] = useState(null);
   const [editConfigName, setEditConfigName] = useState('');
-  const [editSelectedKeys, setEditSelectedKeys] = useState(new Set()); // "courseId__categoryName"
+  const [editSelectedKeys, setEditSelectedKeys] = useState(new Set()); 
   const [categorySearchQuery, setCategorySearchQuery] = useState('');
 
   useEffect(() => {
@@ -421,7 +420,6 @@ export default function App() {
     return [...new Set(cats)].sort();
   }, [allQuestions]);
 
-  // 全コース横断用のツリーデータ { courseId: ['cat1', 'cat2'] }
   const courseCategoryTree = useMemo(() => {
     const tree = {};
     allQuestions.forEach(q => {
@@ -496,30 +494,37 @@ export default function App() {
       let loadedQuestions = [];
       let historyData = {};
 
+      // 【修正①】通信の並列化
       if (targetAppId === 'custom-cross-course') {
         const baseCourses = COURSES.filter(c => c.id !== 'custom-cross-course');
-        for (const course of baseCourses) {
+        
+        const fetchPromises = baseCourses.map(async (course) => {
           const qRef = collection(db, 'artifacts', course.id, 'public', 'data', 'questions');
-          const qSnap = await getDocs(qRef);
+          const hRef = collection(db, 'artifacts', course.id, 'users', uid, 'history');
+          const [qSnap, hSnap] = await Promise.all([getDocs(qRef), getDocs(hRef)]);
+          return { courseId: course.id, qSnap, hSnap };
+        });
+
+        const results = await Promise.all(fetchPromises);
+
+        results.forEach(({ courseId, qSnap, hSnap }) => {
           if (!qSnap.empty) {
             qSnap.docs.forEach(doc => {
-              loadedQuestions.push({...doc.data(), id: doc.id, courseId: course.id});
+              loadedQuestions.push({...doc.data(), id: doc.id, courseId: courseId});
             });
           }
-          const hRef = collection(db, 'artifacts', course.id, 'users', uid, 'history');
-          const hSnap = await getDocs(hRef);
           hSnap.forEach(doc => {
             historyData[doc.id] = doc.data();
           });
-        }
+        });
       } else {
         const qRef = collection(db, 'artifacts', targetAppId, 'public', 'data', 'questions');
-        const qSnap = await getDocs(qRef);
+        const hRef = collection(db, 'artifacts', targetAppId, 'users', uid, 'history');
+        const [qSnap, hSnap] = await Promise.all([getDocs(qRef), getDocs(hRef)]);
+        
         if (!qSnap.empty) {
           loadedQuestions = qSnap.docs.map(doc => ({...doc.data(), id: doc.id, courseId: targetAppId}));
         }
-        const hRef = collection(db, 'artifacts', targetAppId, 'users', uid, 'history');
-        const hSnap = await getDocs(hRef);
         hSnap.forEach(doc => historyData[doc.id] = doc.data());
       }
       
@@ -592,6 +597,9 @@ export default function App() {
         const startIdx = hasHeader ? 1 : 0;
 
         const newQuestions = [];
+        
+        // 【修正②】問題番号が _1 から始まるようにカウンターを追加
+        let questionCounter = 1;
 
         for (let i = startIdx; i < lines.length; i++) {
           const cols = parseCSVLine(lines[i]);
@@ -669,7 +677,7 @@ export default function App() {
             }
           }
 
-          const displayId = `${uploadBatchNum}_${i}`; 
+          const displayId = `${uploadBatchNum}_${questionCounter}`; 
 
           newQuestions.push({
             customId, 
@@ -685,6 +693,8 @@ export default function App() {
             createdAt: new Date().toISOString(),
             displayId
           });
+          
+          questionCounter++;
         }
 
         if (newQuestions.length === 0) {
@@ -732,7 +742,6 @@ export default function App() {
     }
   };
 
-  // --- カスタム問題設定の管理ロジック ---
   const handleCreateNewConfig = () => {
     setEditConfigId(null);
     setEditConfigName('');
@@ -782,7 +791,7 @@ export default function App() {
     }
     
     setSavedCustomConfigs(newConfigs);
-    setActiveCustomConfigId(newConfig.id); // 保存したらそれをアクティブに
+    setActiveCustomConfigId(newConfig.id); 
     setSettingsViewMode('list');
   };
 
@@ -810,7 +819,8 @@ export default function App() {
     setEditSelectedKeys(newKeys);
   };
 
-  const startCustomCrossQuiz = () => {
+  // 【修正③】カスタムモードでの出題分岐（未解答・復習の追加）
+  const startCustomCrossQuiz = (subMode = 'random-20') => {
     const activeConfig = savedCustomConfigs.find(c => c.id === activeCustomConfigId);
     if (!activeConfig || activeConfig.selectedKeys.length === 0) {
       alert("設定が選択されていないか、カテゴリが選択されていません。");
@@ -822,18 +832,36 @@ export default function App() {
       return activeConfig.selectedKeys.includes(key);
     });
 
+    if (subMode === 'unanswered') {
+      targets = targets.filter(q => !userHistory[q.id]);
+      targets = groupAndShuffleQuestions(targets);
+    } else if (subMode === 'review') {
+      targets = targets.filter(q => {
+        const hist = userHistory[q.id];
+        if (!hist) return false; 
+        return hist.isCorrect === false || hist.isUnsure === true;
+      });
+      targets.sort((a, b) => {
+        const rateA = getRecentErrorRate(userHistory[a.id]);
+        const rateB = getRecentErrorRate(userHistory[b.id]);
+        if (Math.abs(rateA - rateB) > 0.0001) return rateB - rateA;
+        return (userHistory[b.id]?.wrongCount || 0) - (userHistory[a.id]?.wrongCount || 0);
+      });
+    } else {
+      targets = groupAndShuffleQuestions(targets, 20);
+    }
+
     if (targets.length === 0) {
-      alert("選択した設定に該当する問題がありません");
+      alert("条件に一致する問題がありません");
       return;
     }
     
-    targets = groupAndShuffleQuestions(targets, 20);
     setQuestions(targets);
     setCurrentQuestionIndex(0);
     resetQuestionState();
     setSessionStats({ correct: 0, total: targets.length });
     setSessionResults([]); 
-    setMode('random-20'); 
+    setMode(subMode === 'random-20' ? 'random-20' : (subMode === 'review' ? 'custom-review' : 'custom')); 
     setView('quiz');
   };
 
@@ -1279,7 +1307,6 @@ export default function App() {
           </div>
 
           {currentAppId === 'custom-cross-course' ? (
-            /* --- 横断カスタム用のUI --- */
             <div className="bg-white p-6 rounded-2xl shadow-sm border-2 border-purple-100 space-y-5">
               <div className="flex justify-between items-center border-b pb-4">
                 <h3 className="font-bold text-gray-800 flex items-center gap-2 text-lg">
@@ -1311,12 +1338,21 @@ export default function App() {
                 )}
               </div>
 
-              <Button onClick={startCustomCrossQuiz} disabled={!activeCustomConfigId || savedCustomConfigs.length === 0} className="w-full bg-purple-600 hover:bg-purple-700 shadow-purple-200 text-white border-none mt-2" size="large">
-                <Target size={20} /> ランダム20問を出題
-              </Button>
+              <div className="flex flex-col gap-3 mt-4">
+                <Button onClick={() => startCustomCrossQuiz('random-20')} disabled={!activeCustomConfigId || savedCustomConfigs.length === 0} className="w-full bg-purple-600 hover:bg-purple-700 shadow-purple-200 text-white border-none" size="large">
+                  <Target size={20} /> ランダム20問を出題
+                </Button>
+                <div className="flex gap-2">
+                  <Button onClick={() => startCustomCrossQuiz('unanswered')} disabled={!activeCustomConfigId || savedCustomConfigs.length === 0} variant="outline" className="flex-1 border-purple-500 text-purple-600 hover:bg-purple-50 text-sm">
+                    未解答をランダム
+                  </Button>
+                  <Button onClick={() => startCustomCrossQuiz('review')} disabled={!activeCustomConfigId || savedCustomConfigs.length === 0} variant="warning" className="flex-1 text-sm bg-amber-500 text-white hover:bg-amber-600 border-none shadow-amber-200">
+                    間違えた問題を復習
+                  </Button>
+                </div>
+              </div>
             </div>
           ) : (
-            /* --- 通常コースのUI --- */
             <>
               <div className="bg-white p-6 rounded-2xl shadow-sm border-2 border-gray-100 space-y-4">
                 <h3 className="font-bold text-gray-800 flex items-center gap-2">
@@ -1395,7 +1431,6 @@ export default function App() {
             </>
           )}
 
-          {/* 管理者メニュー（カスタムコース時は非表示） */}
           {user?.email === ADMIN_EMAIL && currentAppId !== 'custom-cross-course' && (
             <div className="pt-6 border-t border-gray-200">
                <button onClick={() => setView('admin')} className="w-full bg-gray-100 hover:bg-gray-200 text-gray-600 font-bold p-4 rounded-2xl flex items-center justify-center gap-2 transition-colors">
@@ -1403,13 +1438,46 @@ export default function App() {
               </button>
             </div>
           )}
+          
+          {/* 追加：描画負荷対策としてDOMの数を絞る (開発者用リスト) */}
+          {user?.email === ADMIN_EMAIL && currentAppId !== 'custom-cross-course' && view === 'admin' && (
+            <div className="bg-white rounded-3xl shadow-sm p-6 space-y-4">
+              <h2 className="font-bold text-gray-800 flex items-center gap-2 border-b pb-4">
+                <List className="text-gray-600" /> 登録済み問題 ({questions.length})
+              </h2>
+              <div className="space-y-3 max-h-[500px] overflow-y-auto pr-2">
+                {questions.slice(0, 100).map((q, idx) => (
+                  <div key={q.id} className="flex items-start gap-3 p-4 border border-gray-100 rounded-2xl hover:bg-gray-50 transition-colors">
+                    <div className="flex flex-col gap-1 shrink-0 mt-0.5">
+                      <span className="bg-gray-200 text-gray-600 text-xs font-bold px-2 py-1 rounded-md text-center">
+                        No.{idx + 1}
+                      </span>
+                      <span className="bg-blue-50 text-blue-600 text-[10px] font-bold px-1 py-0.5 rounded text-center border border-blue-100">
+                        {q.displayId || '-'}
+                      </span>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                        <span className="text-[10px] bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full font-bold">{q.category}</span>
+                        <span className="text-[10px] bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full font-bold">{q.type}</span>
+                        {q.customId && <span className="text-[10px] bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-bold">ID: {q.customId}</span>}
+                      </div>
+                    </div>
+                    <button onClick={() => handleDeleteQuestion(q.id)} className="p-2 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all shrink-0">
+                      <Trash2 size={18} />
+                    </button>
+                  </div>
+                ))}
+                {questions.length > 100 && <p className="text-center text-sm text-gray-400 py-2">他 {questions.length - 100} 件（負荷軽減のため非表示）</p>}
+                {questions.length === 0 && <p className="text-gray-400 text-center py-8">問題が登録されていません</p>}
+              </div>
+            </div>
+          )}
         </main>
 
-        {/* --- カスタム問題設定 モーダル --- */}
         {showSettingsModal && (
           <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
             <div className="bg-white rounded-3xl w-full max-w-lg max-h-[90vh] flex flex-col shadow-2xl">
-              {/* Header */}
               <div className="flex items-center justify-between p-5 border-b border-gray-100">
                 <h3 className="font-bold text-gray-800 text-lg flex items-center gap-2">
                   <Settings className="text-purple-500"/> 
@@ -1420,7 +1488,6 @@ export default function App() {
                 </button>
               </div>
 
-              {/* Body */}
               <div className="flex-1 overflow-y-auto p-5 space-y-4">
                 {settingsViewMode === 'list' ? (
                   <>
@@ -1470,16 +1537,13 @@ export default function App() {
                     <div className="space-y-4 pt-2">
                       <p className="text-sm font-bold text-gray-700 border-b pb-2">コース・カテゴリ選択</p>
                       {Object.entries(courseCategoryTree).map(([courseId, cats]) => {
-                        // 検索による絞り込み
                         const filteredCats = cats.filter(c => c.toLowerCase().includes(categorySearchQuery.toLowerCase()));
-                        if (filteredCats.length === 0) return null; // 該当なしは非表示
+                        if (filteredCats.length === 0) return null; 
                         
-                        // そのコース内で絞り込まれた全カテゴリが選択されているか
                         const isAllSelected = filteredCats.every(cat => editSelectedKeys.has(`${courseId}__${cat}`));
 
                         return (
                           <div key={courseId} className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
-                            {/* コースヘッダー (一括選択) */}
                             <div className="bg-gray-50 p-3 border-b border-gray-200 flex items-center justify-between">
                               <label className="flex items-center gap-2 cursor-pointer group">
                                 <input 
@@ -1496,7 +1560,6 @@ export default function App() {
                                 {filteredCats.length} カテゴリ
                               </span>
                             </div>
-                            {/* カテゴリ一覧 */}
                             <div className="p-2 grid grid-cols-1 sm:grid-cols-2 gap-1 max-h-48 overflow-y-auto">
                               {filteredCats.map(cat => (
                                 <label key={cat} className="flex items-center gap-2 p-2 hover:bg-purple-50 rounded-lg cursor-pointer transition-colors text-sm text-gray-700">
@@ -1521,7 +1584,6 @@ export default function App() {
                 )}
               </div>
 
-              {/* Footer */}
               {settingsViewMode === 'edit' && (
                 <div className="p-4 border-t border-gray-100 flex gap-3 bg-gray-50 rounded-b-3xl">
                   <Button variant="secondary" onClick={() => setSettingsViewMode('list')} className="flex-1">
@@ -1789,7 +1851,7 @@ export default function App() {
               <List className="text-gray-600" /> 登録済み問題 ({questions.length})
             </h2>
             <div className="space-y-3 max-h-[500px] overflow-y-auto pr-2">
-              {questions.map((q, idx) => (
+              {questions.slice(0, 100).map((q, idx) => (
                 <div key={q.id} className="flex items-start gap-3 p-4 border border-gray-100 rounded-2xl hover:bg-gray-50 transition-colors">
                   <div className="flex flex-col gap-1 shrink-0 mt-0.5">
                     <span className="bg-gray-200 text-gray-600 text-xs font-bold px-2 py-1 rounded-md text-center">
@@ -1811,6 +1873,7 @@ export default function App() {
                   </button>
                 </div>
               ))}
+              {questions.length > 100 && <p className="text-center text-sm text-gray-400 py-2">他 {questions.length - 100} 件（負荷軽減のため非表示）</p>}
               {questions.length === 0 && <p className="text-gray-400 text-center py-8">問題が登録されていません</p>}
             </div>
           </div>
@@ -1851,6 +1914,7 @@ export default function App() {
     }
   }
 
+  // ランダム20問テストのときだけ、解答前はメタ情報を隠す
   const hideMeta = mode === 'random-20' && !showExplanation;
 
   return (
@@ -1873,13 +1937,22 @@ export default function App() {
           </div>
           <span className="text-lg">{currentQuestionIndex + 1} <span className="text-sm text-gray-400">/ {questions.length}</span></span>
           <div className="flex items-center gap-3 mt-1 text-xs text-gray-500 bg-blue-50 px-3 py-1 rounded-full border border-blue-100">
-            <span className="flex items-center gap-1">
-              <History size={12} className="text-blue-400"/> 挑戦: <span className="font-bold text-blue-600">{currentStats.attemptCount}</span>回
-            </span>
-            <span className="w-px h-3 bg-blue-200"></span>
-            <span className="flex items-center gap-1">
-              <XCircle size={12} className="text-red-400"/> 誤答: <span className="font-bold text-red-600">{currentStats.wrongCount}</span>回
-            </span>
+            {/* 【修正④】成績も非表示にする */}
+            {hideMeta ? (
+               <span className="flex items-center gap-1">
+                 <EyeOff size={12} className="text-gray-400"/> 成績非表示
+               </span>
+            ) : (
+              <>
+                <span className="flex items-center gap-1">
+                  <History size={12} className="text-blue-400"/> 挑戦: <span className="font-bold text-blue-600">{currentStats.attemptCount}</span>回
+                </span>
+                <span className="w-px h-3 bg-blue-200"></span>
+                <span className="flex items-center gap-1">
+                  <XCircle size={12} className="text-red-400"/> 誤答: <span className="font-bold text-red-600">{currentStats.wrongCount}</span>回
+                </span>
+              </>
+            )}
           </div>
         </div>
         <div className="w-12">
