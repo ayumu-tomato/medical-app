@@ -415,12 +415,12 @@ export default function App() {
     };
   }, [currentQ, userHistory]);
 
-  const categories = useMemo(() => {
+const categories = useMemo(() => {
     const cats = allQuestions.map(q => q.category).filter(c => c && c.trim() !== '');
-    return [...new Set(cats)].sort();
+    return [...new Set(cats)]; 
   }, [allQuestions]);
 
-  const courseCategoryTree = useMemo(() => {
+const courseCategoryTree = useMemo(() => {
     const tree = {};
     allQuestions.forEach(q => {
       if (!q.courseId) return;
@@ -430,7 +430,7 @@ export default function App() {
       tree[cId].add(cat);
     });
     Object.keys(tree).forEach(k => {
-      tree[k] = Array.from(tree[k]).sort();
+      tree[k] = Array.from(tree[k]); 
     });
     return tree;
   }, [allQuestions]);
