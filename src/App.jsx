@@ -457,7 +457,7 @@ const courseCategoryTree = useMemo(() => {
       ...data,
       progressRate: data.total > 0 ? Math.round((data.answered / data.total) * 100) : 0,
       accuracyRate: data.answered > 0 ? Math.round((data.correct / data.answered) * 100) : 0
-    })).sort((a, b) => a.name.localeCompare(b.name));
+    }));
   }, [allQuestions, userHistory]);
 
   useEffect(() => {
