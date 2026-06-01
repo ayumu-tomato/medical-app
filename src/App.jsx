@@ -71,9 +71,12 @@ const COURSES = [
   { id: 'cbt-clinical-app2', name: 'CBT対策_臨床2' },
   { id: 'cbt-clinical-app3', name: 'CBT対策_臨床3' },
   { id: 'qa-basic-app', name: 'QA_基礎' },
-  { id: 'qa-clinical-app1', name: 'QA_臨床1' },
-  { id: 'qa-clinical-app2', name: 'QA_臨床2' }, 
-  { id: 'qa-clinical-app3', name: 'QA_臨床3' },
+  { id: 'qa-clinical-app1', name: 'QA_メジャー1' },
+  { id: 'qa-clinical-app2', name: 'QA_メジャー2' }, 
+  { id: 'qa-clinical-app3', name: 'QA_メジャー3' },
+  { id: 'qa-clinical-app5', name: 'QA_メジャー4' },
+  { id: 'qa-clinical-app6', name: 'QA_マイナー1' },
+  { id: 'qa-clinical-app7', name: 'QA_マイナー2' },
   { id: 'qa-clinical-app4', name: 'QA_解説付き' },
   { id: 'custom-cross-course', name: 'カスタム (全コース横断)' }
 ];
