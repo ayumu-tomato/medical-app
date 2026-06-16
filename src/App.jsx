@@ -77,6 +77,7 @@ const COURSES = [
   { id: 'qa-clinical-app5', name: 'QA_メジャー4' },
   { id: 'qa-clinical-app6', name: 'QA_マイナー1' },
   { id: 'qa-clinical-app7', name: 'QA_マイナー2' },
+  { id: 'sonota', name: 'その他' },
   { id: 'qa-clinical-app4', name: 'QA_解説付き' },
   { id: 'custom-cross-course', name: 'カスタム (全コース横断)' }
 ];
