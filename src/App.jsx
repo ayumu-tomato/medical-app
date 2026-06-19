@@ -58,7 +58,7 @@ import {
   Layers,
   Settings,
   Edit2,
-  Printer // 追加
+  Printer
 } from 'lucide-react';
 
 // --- Configuration ---
@@ -82,6 +82,8 @@ const COURSES = [
   { id: 'qa-clinical-app4', name: 'QA_解説付き' },
   { id: 'custom-cross-course', name: 'カスタム (全コース横断)' }
 ];
+
+
 const getCourseName = (id) => {
   const course = COURSES.find(c => c.id === id);
   return course ? course.name : id;
@@ -347,7 +349,7 @@ export default function App() {
   const [editSelectedKeys, setEditSelectedKeys] = useState(new Set()); 
   const [categorySearchQuery, setCategorySearchQuery] = useState('');
 
-  // 直近50回答分のログステート
+  // 直近50回答分のログステート (コース横断グローバル)
   const [recentLogs, setRecentLogs] = useState([]);
 
   useEffect(() => {
@@ -358,10 +360,10 @@ export default function App() {
     localStorage.setItem('med-app-active-custom-config', activeCustomConfigId);
   }, [activeCustomConfigId]);
 
-  // ログの読み込み
+  // グローバルログの読み込み
   useEffect(() => {
-    if (user && currentAppId) {
-      const savedLogs = localStorage.getItem(`med-app-logs-${user.uid}-${currentAppId}`);
+    if (user) {
+      const savedLogs = localStorage.getItem(`med-app-logs-${user.uid}-global`);
       if (savedLogs) {
         try {
           setRecentLogs(JSON.parse(savedLogs));
@@ -372,7 +374,7 @@ export default function App() {
         setRecentLogs([]);
       }
     }
-  }, [user, currentAppId]);
+  }, [user]);
 
   const [newQ, setNewQ] = useState({
     customId: '', type: 'single', category: '', questionText: '', imageUrl: '', options: ['', '', '', '', ''], correctAnswerInput: '', explanation: '', caseText: '', caseImageUrl: ''
@@ -1035,12 +1037,16 @@ export default function App() {
 
     setSessionResults(prev => [...prev, { category: currentQ.category || '未分類', isCorrect }]);
 
-    // 直近50回答ログの保存
+    const targetDbCourseId = currentQ.courseId || currentAppId;
+
+    // 直近50回答ログの保存 (グローバル)
     const newLogEntry = {
       logId: Date.now().toString() + Math.random().toString(36).substr(2, 5),
       timestamp: new Date().toISOString(),
       displayId: currentQ.displayId || '',
       customId: currentQ.customId || '',
+      courseId: targetDbCourseId,
+      courseName: getCourseName(targetDbCourseId), // コース名も一緒に保存
       category: currentQ.category || '未分類',
       questionText: currentQ.questionText || '',
       options: currentOptions || [],
@@ -1051,7 +1057,7 @@ export default function App() {
 
     setRecentLogs(prev => {
       const updatedLogs = [newLogEntry, ...prev].slice(0, 50);
-      localStorage.setItem(`med-app-logs-${user.uid}-${currentAppId}`, JSON.stringify(updatedLogs));
+      localStorage.setItem(`med-app-logs-${user.uid}-global`, JSON.stringify(updatedLogs));
       return updatedLogs;
     });
 
@@ -1080,7 +1086,6 @@ export default function App() {
       
       setUserHistory(prev => ({ ...prev, [currentQ.id]: resultData }));
       
-      const targetDbCourseId = currentQ.courseId || currentAppId;
       await setDoc(doc(db, 'artifacts', targetDbCourseId, 'users', user.uid, 'history', currentQ.id), resultData);
     }
     setShowExplanation(true);
@@ -1091,13 +1096,13 @@ export default function App() {
     const newUnsureStatus = !isUnsure;
     setIsUnsure(newUnsureStatus);
 
-    // 回答ログのisUnsure状態も更新
+    // 回答ログ(グローバル)のisUnsure状態も更新
     setRecentLogs(prev => {
       if (prev.length === 0) return prev;
       const updatedLogs = [...prev];
       if (updatedLogs[0].displayId === currentQ.displayId) {
         updatedLogs[0].isUnsure = newUnsureStatus;
-        localStorage.setItem(`med-app-logs-${user.uid}-${currentAppId}`, JSON.stringify(updatedLogs));
+        localStorage.setItem(`med-app-logs-${user.uid}-global`, JSON.stringify(updatedLogs));
       }
       return updatedLogs;
     });
@@ -1307,6 +1312,15 @@ export default function App() {
     );
   }
 
+  // --- iPhone向け PDF出力対応関数 ---
+  const handlePrint = () => {
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    if (isIOS) {
+      alert("【iPhoneでのPDF保存方法】\n\n印刷画面が開いたら、プレビュー画像を「ピンチアウト（2本指で拡大）」するか、上部の「共有アイコン」から「ファイルに保存」を選ぶとPDFとして保存できます。");
+    }
+    window.print();
+  };
+
   // --- 回答ログ確認画面 ---
   if (view === 'logs') {
     return (
@@ -1314,13 +1328,14 @@ export default function App() {
         <style>{`
           @media print {
             .no-print { display: none !important; }
-            body { background: white; margin: 0; padding: 0; }
+            body, html { width: 100%; height: auto !important; overflow: visible !important; background: white; margin: 0; padding: 0; }
+            .print-container { overflow: visible !important; height: auto !important; max-height: none !important; display: block !important; }
             .print-card { 
               page-break-inside: avoid; 
-              border: 1px solid #ddd; 
+              border: 1px solid #ccc; 
               box-shadow: none !important; 
               break-inside: avoid; 
-              margin-bottom: 12px;
+              margin-bottom: 15px;
               background-color: white !important;
             }
           }
@@ -1332,7 +1347,7 @@ export default function App() {
             </button>
             <h1 className="text-xl font-bold text-gray-800">直近50回答ログ</h1>
           </div>
-          <Button onClick={() => window.print()} variant="secondary" size="small" className="border-gray-300">
+          <Button onClick={handlePrint} variant="secondary" size="small" className="border-gray-300">
             <Printer size={16} className="text-gray-600" /> PDF出力
           </Button>
         </header>
@@ -1357,7 +1372,7 @@ export default function App() {
                 <div key={log.logId} className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 print-card space-y-3">
                   <div className="flex justify-between items-start border-b border-gray-100 pb-3">
                     <span className="text-sm font-bold text-gray-500">
-                      {log.category} (ID: {log.customId || log.displayId})
+                      [{log.courseName}] {log.category} (ID: {log.customId || log.displayId})
                     </span>
                     <span className={`text-xs font-bold px-2 py-1 rounded-md ${statusColor}`}>
                       {statusLabel}
@@ -1851,168 +1866,6 @@ export default function App() {
             <Home size={20} /> ダッシュボードへ戻る
           </Button>
         </div>
-      </div>
-    );
-  }
-
-  if (view === 'admin') {
-    return (
-      <div className="min-h-screen bg-gray-50">
-        <header className="bg-white shadow-sm px-6 py-4 flex items-center sticky top-0 z-20 safe-area-top gap-4">
-          <button onClick={() => setView('dashboard')} className="p-2 -ml-2 text-gray-500 hover:bg-gray-100 rounded-full">
-            <ArrowLeft size={24} />
-          </button>
-          <div>
-            <h1 className="text-xl font-bold text-gray-800">問題管理</h1>
-            <p className="text-xs text-blue-600 font-bold">{COURSES.find(c=>c.id===currentAppId).name} コース編集中</p>
-          </div>
-        </header>
-        <main className="p-6 max-w-2xl mx-auto pb-32 space-y-8">
-          <div className="bg-white rounded-3xl shadow-sm p-6 space-y-4 border border-green-100">
-            <h2 className="font-bold text-gray-800 flex items-center gap-2">
-              <Plus className="text-green-600" /> 手動で問題を追加
-            </h2>
-            <div className="space-y-4">
-               <div className="grid grid-cols-2 gap-4">
-                 <select value={newQ.type} onChange={(e) => setNewQ({...newQ, type: e.target.value})} className="w-full px-4 py-2 rounded-xl border-2 border-gray-100 focus:ring-2 focus:ring-green-500 outline-none bg-gray-50">
-                   <option value="single">単一選択</option>
-                   <option value="multi">複数選択</option>
-                   <option value="input">記述式</option>
-                   <option value="series">連問 (Series)</option>
-                   <option value="series-multi">連問-複数選択 (Series-Multi)</option>
-                   <option value="series-input">連問-記述式 (Series-Input)</option>
-                   <option value="hyper">多肢選択 (Hyper)</option>
-                 </select>
-                 <Input value={newQ.category} onChange={(e) => setNewQ({...newQ, category: e.target.value})} placeholder="カテゴリ (例: 循環器)" />
-               </div>
-               
-               {newQ.type.startsWith('series') && (
-                 <div className="flex items-center gap-2 bg-gray-100 p-2 rounded-xl">
-                   <LinkIcon size={16} className="text-gray-500"/>
-                   <Input 
-                     value={newQ.customId} 
-                     onChange={(e) => setNewQ({...newQ, customId: e.target.value})} 
-                     placeholder="問題ID (連問用: 1234567890_1 など)" 
-                     className="text-sm"
-                   />
-                 </div>
-               )}
-
-               {newQ.type.startsWith('series') && (
-                 <>
-                   <textarea value={newQ.caseText} onChange={(e) => setNewQ({...newQ, caseText: e.target.value})} placeholder="症例本文 (長文がある場合に入力)..." className="w-full px-4 py-3 rounded-xl border-2 border-gray-200 focus:ring-2 focus:ring-green-500 outline-none h-24 resize-none bg-gray-50" />
-                   <Input value={newQ.caseImageUrl} onChange={(e) => setNewQ({...newQ, caseImageUrl: e.target.value})} placeholder="症例画像URL (Google Drive共有リンク可)" />
-                 </>
-               )}
-
-               <textarea value={newQ.questionText} onChange={(e) => setNewQ({...newQ, questionText: e.target.value})} placeholder="問題文を入力..." className="w-full px-4 py-3 rounded-xl border-2 border-gray-200 focus:ring-2 focus:ring-green-500 outline-none h-24 resize-none bg-gray-50" />
-               <Input value={newQ.imageUrl} onChange={(e) => setNewQ({...newQ, imageUrl: e.target.value})} placeholder="画像URL (Google Drive共有リンク可)" />
-               
-               {newQ.type.includes('input') ? (
-                 <Input value={newQ.correctAnswerInput} onChange={(e) => setNewQ({...newQ, correctAnswerInput: e.target.value})} placeholder="正解 (複数の場合は | で区切る)" />
-               ) : (
-                 <div className="space-y-2">
-                   <label className="block text-xs font-bold text-gray-500 ml-1 mb-1">選択肢 (チェックで正解指定)</label>
-                   {newQ.options.map((opt, idx) => (
-                     <div key={idx} className="flex gap-2 items-center">
-                       <input type="checkbox" checked={adminSelectedIndices.includes(idx)} onChange={() => { if (newQ.type === 'single' || newQ.type === 'series') setAdminSelectedIndices([idx]); else { if (adminSelectedIndices.includes(idx)) setAdminSelectedIndices(adminSelectedIndices.filter(i => i !== idx)); else setAdminSelectedIndices([...adminSelectedIndices, idx]); } }} className="w-5 h-5 accent-green-600 shrink-0" />
-                       <Input value={opt} onChange={(e) => { const newOpts = [...newQ.options]; newOpts[idx] = e.target.value; setNewQ({...newQ, options: newOpts}); }} placeholder={`選択肢 ${idx + 1}`} />
-                       <button onClick={() => handleRemoveOption(idx)} className="p-2 text-gray-400 hover:text-red-500 bg-gray-100 hover:bg-red-50 rounded-lg transition-colors shrink-0" disabled={newQ.options.length <= 2}>
-                         <Minus size={16}/>
-                       </button>
-                     </div>
-                   ))}
-                   <Button onClick={handleAddOption} variant="secondary" size="small" className="w-full border-dashed text-gray-500">
-                     <Plus size={16}/> 選択肢を追加
-                   </Button>
-                 </div>
-               )}
-               <textarea value={newQ.explanation} onChange={(e) => setNewQ({...newQ, explanation: e.target.value})} placeholder="解説を入力..." className="w-full px-4 py-3 rounded-xl border-2 border-gray-200 focus:ring-2 focus:ring-green-500 outline-none h-24 resize-none bg-gray-50" />
-               <Button onClick={handleCreateQuestion} variant="success" className="w-full">追加する</Button>
-            </div>
-          </div>
-          <div className="bg-white rounded-3xl shadow-sm p-6 space-y-4 border border-blue-100">
-            <h2 className="font-bold text-gray-800 flex items-center gap-2">
-              <FileText className="text-blue-600" /> Excel/CSV一括登録
-            </h2>
-            <div className="space-y-3">
-              <div className="flex items-center gap-2 p-2 bg-blue-50 rounded-lg">
-                <span className="text-xs font-bold text-blue-700 whitespace-nowrap">今回アップロード回数:</span>
-                <Input type="number" value={uploadBatchNum} onChange={(e) => setUploadBatchNum(e.target.value)} className="w-20 py-1 px-2 text-center text-sm h-8" placeholder="3" />
-                <span className="text-xs text-blue-500">例: 3を入力→ 3_1, 3_2...</span>
-              </div>
-              <div className="flex gap-3">
-                <Button onClick={downloadTemplate} variant="secondary" size="small" className="flex-1">
-                  <Download size={16} /> 雛形DL
-                </Button>
-                <div className="relative flex-1">
-                  <input type="file" accept=".csv" onChange={handleFileUpload} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
-                  <Button variant="success" size="small" className="w-full">
-                    <Upload size={16} /> CSV読込
-                  </Button>
-                </div>
-              </div>
-            </div>
-            {importStatus && <p className="text-sm font-bold text-center text-blue-600">{importStatus}</p>}
-          </div>
-          <div className="bg-white rounded-3xl shadow-sm p-6 space-y-6 border border-red-100">
-            <h2 className="font-bold text-gray-800 flex items-center gap-2 text-red-600">
-              <Trash2 className="text-red-600" /> 削除メニュー
-            </h2>
-            <div className="space-y-2">
-              <p className="text-sm font-bold text-gray-600">ID範囲指定削除</p>
-              <div className="flex gap-2 items-center">
-                <div className="w-20 shrink-0">
-                  <Input type="number" placeholder="回" value={deleteRange.batch} onChange={e=>setDeleteRange({...deleteRange, batch:e.target.value})} className="text-center"/>
-                </div>
-                <span className="text-gray-400 font-bold">の</span>
-                <Input type="number" placeholder="開始No." value={deleteRange.start} onChange={e=>setDeleteRange({...deleteRange, start:e.target.value})} className="text-center"/>
-                <span className="text-gray-400 font-bold">〜</span>
-                <Input type="number" placeholder="終了No." value={deleteRange.end} onChange={e=>setDeleteRange({...deleteRange, end:e.target.value})} className="text-center"/>
-              </div>
-              <p className="text-xs text-gray-400 text-center">例: 「3」の「2」〜「50」→ ID 3_2 〜 3_50 を削除</p>
-              <Button onClick={handleDeleteRange} variant="danger" size="small" className="w-full mt-2">
-                指定範囲を削除
-              </Button>
-            </div>
-            <div className="pt-4 border-t border-gray-100">
-              <Button onClick={handleDeleteAll} variant="dangerSolid" className="w-full">
-                <Trash2 size={20} /> 全ての問題を削除
-              </Button>
-            </div>
-          </div>
-          <div className="bg-white rounded-3xl shadow-sm p-6 space-y-4">
-              <h2 className="font-bold text-gray-800 flex items-center gap-2 border-b pb-4">
-              <List className="text-gray-600" /> 登録済み問題 ({questions.length})
-            </h2>
-            <div className="space-y-3 max-h-[500px] overflow-y-auto pr-2">
-              {questions.slice(0, 100).map((q, idx) => (
-                <div key={q.id} className="flex items-start gap-3 p-4 border border-gray-100 rounded-2xl hover:bg-gray-50 transition-colors">
-                  <div className="flex flex-col gap-1 shrink-0 mt-0.5">
-                    <span className="bg-gray-200 text-gray-600 text-xs font-bold px-2 py-1 rounded-md text-center">
-                      No.{idx + 1}
-                    </span>
-                    <span className="bg-blue-50 text-blue-600 text-[10px] font-bold px-1 py-0.5 rounded text-center border border-blue-100">
-                      {q.displayId || '-'}
-                    </span>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-                      <span className="text-[10px] bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full font-bold">{q.category}</span>
-                      <span className="text-[10px] bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full font-bold">{q.type}</span>
-                      {q.customId && <span className="text-[10px] bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-bold">ID: {q.customId}</span>}
-                    </div>
-                  </div>
-                  <button onClick={() => handleDeleteQuestion(q.id)} className="p-2 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all shrink-0">
-                    <Trash2 size={18} />
-                  </button>
-                </div>
-              ))}
-              {questions.length > 100 && <p className="text-center text-sm text-gray-400 py-2">他 {questions.length - 100} 件（負荷軽減のため非表示）</p>}
-              {questions.length === 0 && <p className="text-gray-400 text-center py-8">問題が登録されていません</p>}
-            </div>
-          </div>
-        </main>
       </div>
     );
   }
