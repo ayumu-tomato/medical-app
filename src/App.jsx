@@ -19,10 +19,10 @@ import {
   deleteDoc, 
   writeBatch,
   updateDoc,
-  query,       // 追加
-  orderBy,     // 追加
-  limit,       // 追加
-  getDoc       // 追加
+  query,
+  orderBy,
+  limit,
+  getDoc
 } from 'firebase/firestore';
 import { 
   BookOpen, 
@@ -337,7 +337,6 @@ export default function App() {
   const [searchId, setSearchId] = useState('');
   const [statsTab, setStatsTab] = useState('progress');
   
-  // カスタム問題設定のステート
   const [savedCustomConfigs, setSavedCustomConfigs] = useState(() => {
     const saved = localStorage.getItem('med-app-custom-configs');
     return saved ? JSON.parse(saved) : [];
@@ -353,7 +352,6 @@ export default function App() {
   const [editSelectedKeys, setEditSelectedKeys] = useState(new Set()); 
   const [categorySearchQuery, setCategorySearchQuery] = useState('');
 
-  // 直近50回答分のログステート (Firestore同期用)
   const [recentLogs, setRecentLogs] = useState([]);
 
   useEffect(() => {
@@ -364,12 +362,10 @@ export default function App() {
     localStorage.setItem('med-app-active-custom-config', activeCustomConfigId);
   }, [activeCustomConfigId]);
 
-  // Firestoreからグローバルログ（最新50件）を取得する関数
   const fetchGlobalLogs = async (uid) => {
     if (!uid) return;
     try {
       const logsRef = collection(db, 'artifacts', 'custom-cross-course', 'users', uid, 'logs');
-      // timestamp降順で最大50件取得
       const q = query(logsRef, orderBy('timestamp', 'desc'), limit(50));
       const snapshot = await getDocs(q);
       const logs = [];
@@ -382,7 +378,6 @@ export default function App() {
     }
   };
 
-  // Viewが 'logs' に切り替わった時、またはマウント時に最新ログを取得
   useEffect(() => {
     if (user && view === 'logs') {
       fetchGlobalLogs(user.uid);
@@ -598,23 +593,26 @@ export default function App() {
     document.body.removeChild(link);
   };
 
+  // 【修正②】ファイルの連続アップロードを可能にする対応
   const handleFileUpload = async (event) => {
-    const file = event.target.files[0];
+    const fileInput = event.target;
+    const file = fileInput.files[0];
     if (!file) return;
+    
     if (!uploadBatchNum || isNaN(parseInt(uploadBatchNum))) {
       alert("アップロード回数（バッチ番号）を入力してください");
-      event.target.value = ''; 
+      fileInput.value = ''; // 失敗時もクリア
       return;
     }
     const isDuplicateBatch = allQuestions.some(q => {
       if (!q.displayId) return false;
       const parts = q.displayId.split('_');
-      return parts[0] === uploadBatchNum;
+      return parts[0] === String(uploadBatchNum);
     });
     if (isDuplicateBatch) {
       alert(`エラー: 第${uploadBatchNum}回のデータは既に存在します。\n別の番号を指定するか、既存のデータを削除してからアップロードしてください。`);
       setImportStatus('エラー: バッチ番号重複');
-      event.target.value = ''; 
+      fileInput.value = ''; // 失敗時もクリア
       return;
     }
 
@@ -754,6 +752,8 @@ export default function App() {
       } catch (error) {
         console.error(error);
         setImportStatus('エラー: CSV形式を確認してください');
+      } finally {
+        fileInput.value = ''; // 成功・失敗に関わらずクリアする
       }
     };
     reader.readAsText(file);
@@ -1052,7 +1052,6 @@ export default function App() {
 
     const targetDbCourseId = currentQ.courseId || currentAppId;
 
-    // --- 【変更①】Firestoreにグローバルログを保存 ---
     const newLogId = Date.now().toString() + Math.random().toString(36).substr(2, 5);
     const newLogEntry = {
       timestamp: new Date().toISOString(),
@@ -1072,7 +1071,6 @@ export default function App() {
       try {
         const logDocRef = doc(db, 'artifacts', 'custom-cross-course', 'users', user.uid, 'logs', newLogId);
         await setDoc(logDocRef, newLogEntry);
-        // メモリ上の配列も更新して画面に即反映
         setRecentLogs(prev => [{logId: newLogId, ...newLogEntry}, ...prev].slice(0, 50));
       } catch (error) {
         console.error("Log save error:", error);
@@ -1114,13 +1112,11 @@ export default function App() {
     const newUnsureStatus = !isUnsure;
     setIsUnsure(newUnsureStatus);
 
-    // --- 【変更②】Firestore上のログのisUnsureも更新 ---
     const targetLog = recentLogs.find(log => log.displayId === currentQ.displayId);
     if (targetLog && targetLog.logId) {
       try {
         const logDocRef = doc(db, 'artifacts', 'custom-cross-course', 'users', user.uid, 'logs', targetLog.logId);
         await updateDoc(logDocRef, { isUnsure: newUnsureStatus });
-        // メモリ上の配列も更新
         setRecentLogs(prev => prev.map(log => log.logId === targetLog.logId ? {...log, isUnsure: newUnsureStatus} : log));
       } catch (error) {
         console.error("Log update error:", error);
@@ -1227,6 +1223,7 @@ export default function App() {
     }
   };
 
+  // 【修正③】手動追加の undefined エラークラッシュ対応
   const handleCreateQuestion = async () => {
     if (!newQ.questionText || !newQ.category || !newQ.explanation) {
       alert('必須項目を入力してください'); return;
@@ -1238,8 +1235,12 @@ export default function App() {
       finalCorrectAnswer = newQ.correctAnswerInput;
     } else {
       if (adminSelectedIndices.length === 0) { alert('正解を選択'); return; }
-      if (newQ.type === 'single' || newQ.type === 'series') finalCorrectAnswer = cleanOptions[adminSelectedIndices[0]];
-      else finalCorrectAnswer = adminSelectedIndices.map(i => cleanOptions[i]);
+      // cleanOptionsへのインデックス参照を修正し、生のnewQ.optionsから安全に取得する
+      if (newQ.type === 'single' || newQ.type === 'series') {
+        finalCorrectAnswer = newQ.options[adminSelectedIndices[0]] || "";
+      } else {
+        finalCorrectAnswer = adminSelectedIndices.map(i => newQ.options[i] || "");
+      }
     }
     const newQuestionData = {
       customId: newQ.customId || '', 
@@ -1257,7 +1258,7 @@ export default function App() {
     };
     try {
       const docRef = await addDoc(collection(db, 'artifacts', currentAppId, 'public', 'data', 'questions'), newQuestionData);
-      const added = { ...newQuestionData, id: docRef.id };
+      const added = { ...newQuestionData, id: docRef.id, courseId: currentAppId };
       setAllQuestions([...allQuestions, added]);
       setQuestions([...allQuestions, added]);
       alert('追加しました');
@@ -1332,7 +1333,6 @@ export default function App() {
     );
   }
 
-  // --- iPhone向け PDF出力対応関数 ---
   const handlePrint = () => {
     const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
     if (isIOS) {
@@ -1341,7 +1341,6 @@ export default function App() {
     window.print();
   };
 
-  // --- 回答ログ確認画面 ---
   if (view === 'logs') {
     return (
       <div className="min-h-screen bg-gray-50 pb-20 print-container">
@@ -1602,9 +1601,19 @@ export default function App() {
             </>
           )}
 
-          {user?.email === ADMIN_EMAIL && currentAppId !== 'custom-cross-course' && (
+          {/* 【修正①】カスタムモード時の追加・管理ボタンのアラート対応 */}
+          {user?.email === ADMIN_EMAIL && (
             <div className="pt-6 border-t border-gray-200">
-               <button onClick={() => setView('admin')} className="w-full bg-gray-100 hover:bg-gray-200 text-gray-600 font-bold p-4 rounded-2xl flex items-center justify-center gap-2 transition-colors">
+               <button 
+                 onClick={() => {
+                   if (currentAppId === 'custom-cross-course') {
+                     alert('【カスタム (全コース横断)】モードでは直接問題を追加できません。\n画面上のメニューから「試験対策」や「CBT対策」などの追加先のコースを選択してから再度お試しください。');
+                   } else {
+                     setView('admin');
+                   }
+                 }} 
+                 className="w-full bg-gray-100 hover:bg-gray-200 text-gray-600 font-bold p-4 rounded-2xl flex items-center justify-center gap-2 transition-colors"
+               >
                 <Plus size={20} /> 問題の追加・管理
               </button>
             </div>
