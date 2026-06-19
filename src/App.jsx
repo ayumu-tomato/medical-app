@@ -18,7 +18,11 @@ import {
   addDoc,
   deleteDoc, 
   writeBatch,
-  updateDoc
+  updateDoc,
+  query,       // 追加
+  orderBy,     // 追加
+  limit,       // 追加
+  getDoc       // 追加
 } from 'firebase/firestore';
 import { 
   BookOpen, 
@@ -349,7 +353,7 @@ export default function App() {
   const [editSelectedKeys, setEditSelectedKeys] = useState(new Set()); 
   const [categorySearchQuery, setCategorySearchQuery] = useState('');
 
-  // 直近50回答分のログステート (コース横断グローバル)
+  // 直近50回答分のログステート (Firestore同期用)
   const [recentLogs, setRecentLogs] = useState([]);
 
   useEffect(() => {
@@ -360,21 +364,30 @@ export default function App() {
     localStorage.setItem('med-app-active-custom-config', activeCustomConfigId);
   }, [activeCustomConfigId]);
 
-  // グローバルログの読み込み
-  useEffect(() => {
-    if (user) {
-      const savedLogs = localStorage.getItem(`med-app-logs-${user.uid}-global`);
-      if (savedLogs) {
-        try {
-          setRecentLogs(JSON.parse(savedLogs));
-        } catch(e) {
-          setRecentLogs([]);
-        }
-      } else {
-        setRecentLogs([]);
-      }
+  // Firestoreからグローバルログ（最新50件）を取得する関数
+  const fetchGlobalLogs = async (uid) => {
+    if (!uid) return;
+    try {
+      const logsRef = collection(db, 'artifacts', 'custom-cross-course', 'users', uid, 'logs');
+      // timestamp降順で最大50件取得
+      const q = query(logsRef, orderBy('timestamp', 'desc'), limit(50));
+      const snapshot = await getDocs(q);
+      const logs = [];
+      snapshot.forEach(doc => {
+        logs.push({ logId: doc.id, ...doc.data() });
+      });
+      setRecentLogs(logs);
+    } catch (error) {
+      console.error("Error fetching logs:", error);
     }
-  }, [user]);
+  };
+
+  // Viewが 'logs' に切り替わった時、またはマウント時に最新ログを取得
+  useEffect(() => {
+    if (user && view === 'logs') {
+      fetchGlobalLogs(user.uid);
+    }
+  }, [user, view]);
 
   const [newQ, setNewQ] = useState({
     customId: '', type: 'single', category: '', questionText: '', imageUrl: '', options: ['', '', '', '', ''], correctAnswerInput: '', explanation: '', caseText: '', caseImageUrl: ''
@@ -1039,14 +1052,14 @@ export default function App() {
 
     const targetDbCourseId = currentQ.courseId || currentAppId;
 
-    // 直近50回答ログの保存 (グローバル)
+    // --- 【変更①】Firestoreにグローバルログを保存 ---
+    const newLogId = Date.now().toString() + Math.random().toString(36).substr(2, 5);
     const newLogEntry = {
-      logId: Date.now().toString() + Math.random().toString(36).substr(2, 5),
       timestamp: new Date().toISOString(),
       displayId: currentQ.displayId || '',
       customId: currentQ.customId || '',
       courseId: targetDbCourseId,
-      courseName: getCourseName(targetDbCourseId), // コース名も一緒に保存
+      courseName: getCourseName(targetDbCourseId), 
       category: currentQ.category || '未分類',
       questionText: currentQ.questionText || '',
       options: currentOptions || [],
@@ -1055,11 +1068,16 @@ export default function App() {
       isUnsure: false
     };
 
-    setRecentLogs(prev => {
-      const updatedLogs = [newLogEntry, ...prev].slice(0, 50);
-      localStorage.setItem(`med-app-logs-${user.uid}-global`, JSON.stringify(updatedLogs));
-      return updatedLogs;
-    });
+    if (user) {
+      try {
+        const logDocRef = doc(db, 'artifacts', 'custom-cross-course', 'users', user.uid, 'logs', newLogId);
+        await setDoc(logDocRef, newLogEntry);
+        // メモリ上の配列も更新して画面に即反映
+        setRecentLogs(prev => [{logId: newLogId, ...newLogEntry}, ...prev].slice(0, 50));
+      } catch (error) {
+        console.error("Log save error:", error);
+      }
+    }
 
     if (user) {
       const prevHistory = userHistory[currentQ.id] || {};
@@ -1096,16 +1114,18 @@ export default function App() {
     const newUnsureStatus = !isUnsure;
     setIsUnsure(newUnsureStatus);
 
-    // 回答ログ(グローバル)のisUnsure状態も更新
-    setRecentLogs(prev => {
-      if (prev.length === 0) return prev;
-      const updatedLogs = [...prev];
-      if (updatedLogs[0].displayId === currentQ.displayId) {
-        updatedLogs[0].isUnsure = newUnsureStatus;
-        localStorage.setItem(`med-app-logs-${user.uid}-global`, JSON.stringify(updatedLogs));
+    // --- 【変更②】Firestore上のログのisUnsureも更新 ---
+    const targetLog = recentLogs.find(log => log.displayId === currentQ.displayId);
+    if (targetLog && targetLog.logId) {
+      try {
+        const logDocRef = doc(db, 'artifacts', 'custom-cross-course', 'users', user.uid, 'logs', targetLog.logId);
+        await updateDoc(logDocRef, { isUnsure: newUnsureStatus });
+        // メモリ上の配列も更新
+        setRecentLogs(prev => prev.map(log => log.logId === targetLog.logId ? {...log, isUnsure: newUnsureStatus} : log));
+      } catch (error) {
+        console.error("Log update error:", error);
       }
-      return updatedLogs;
-    });
+    }
 
     const updatedHistory = {
       ...userHistory[currentQ.id],
@@ -1369,7 +1389,7 @@ export default function App() {
               const displayUserAns = Array.isArray(log.userAnswer) ? log.userAnswer.join(', ') : log.userAnswer;
               
               return (
-                <div key={log.logId} className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 print-card space-y-3">
+                <div key={log.logId || i} className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 print-card space-y-3">
                   <div className="flex justify-between items-start border-b border-gray-100 pb-3">
                     <span className="text-sm font-bold text-gray-500">
                       [{log.courseName}] {log.category} (ID: {log.customId || log.displayId})
