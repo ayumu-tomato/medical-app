@@ -57,7 +57,8 @@ import {
   Target,
   Layers,
   Settings,
-  Edit2
+  Edit2,
+  Printer // 追加
 } from 'lucide-react';
 
 // --- Configuration ---
@@ -81,7 +82,6 @@ const COURSES = [
   { id: 'qa-clinical-app4', name: 'QA_解説付き' },
   { id: 'custom-cross-course', name: 'カスタム (全コース横断)' }
 ];
-
 const getCourseName = (id) => {
   const course = COURSES.find(c => c.id === id);
   return course ? course.name : id;
@@ -347,6 +347,9 @@ export default function App() {
   const [editSelectedKeys, setEditSelectedKeys] = useState(new Set()); 
   const [categorySearchQuery, setCategorySearchQuery] = useState('');
 
+  // 直近50回答分のログステート
+  const [recentLogs, setRecentLogs] = useState([]);
+
   useEffect(() => {
     localStorage.setItem('med-app-custom-configs', JSON.stringify(savedCustomConfigs));
   }, [savedCustomConfigs]);
@@ -354,6 +357,22 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('med-app-active-custom-config', activeCustomConfigId);
   }, [activeCustomConfigId]);
+
+  // ログの読み込み
+  useEffect(() => {
+    if (user && currentAppId) {
+      const savedLogs = localStorage.getItem(`med-app-logs-${user.uid}-${currentAppId}`);
+      if (savedLogs) {
+        try {
+          setRecentLogs(JSON.parse(savedLogs));
+        } catch(e) {
+          setRecentLogs([]);
+        }
+      } else {
+        setRecentLogs([]);
+      }
+    }
+  }, [user, currentAppId]);
 
   const [newQ, setNewQ] = useState({
     customId: '', type: 'single', category: '', questionText: '', imageUrl: '', options: ['', '', '', '', ''], correctAnswerInput: '', explanation: '', caseText: '', caseImageUrl: ''
@@ -419,12 +438,12 @@ export default function App() {
     };
   }, [currentQ, userHistory]);
 
-const categories = useMemo(() => {
+  const categories = useMemo(() => {
     const cats = allQuestions.map(q => q.category).filter(c => c && c.trim() !== '');
-    return [...new Set(cats)]; 
+    return [...new Set(cats)];
   }, [allQuestions]);
 
-const courseCategoryTree = useMemo(() => {
+  const courseCategoryTree = useMemo(() => {
     const tree = {};
     allQuestions.forEach(q => {
       if (!q.courseId) return;
@@ -434,7 +453,7 @@ const courseCategoryTree = useMemo(() => {
       tree[cId].add(cat);
     });
     Object.keys(tree).forEach(k => {
-      tree[k] = Array.from(tree[k]); 
+      tree[k] = Array.from(tree[k]);
     });
     return tree;
   }, [allQuestions]);
@@ -498,7 +517,6 @@ const courseCategoryTree = useMemo(() => {
       let loadedQuestions = [];
       let historyData = {};
 
-      // 【修正①】通信の並列化
       if (targetAppId === 'custom-cross-course') {
         const baseCourses = COURSES.filter(c => c.id !== 'custom-cross-course');
         
@@ -601,8 +619,6 @@ const courseCategoryTree = useMemo(() => {
         const startIdx = hasHeader ? 1 : 0;
 
         const newQuestions = [];
-        
-        // 【修正②】問題番号が _1 から始まるようにカウンターを追加
         let questionCounter = 1;
 
         for (let i = startIdx; i < lines.length; i++) {
@@ -823,7 +839,6 @@ const courseCategoryTree = useMemo(() => {
     setEditSelectedKeys(newKeys);
   };
 
-  // 【修正③】カスタムモードでの出題分岐（未解答・復習の追加）
   const startCustomCrossQuiz = (subMode = 'random-20') => {
     const activeConfig = savedCustomConfigs.find(c => c.id === activeCustomConfigId);
     if (!activeConfig || activeConfig.selectedKeys.length === 0) {
@@ -1020,6 +1035,26 @@ const courseCategoryTree = useMemo(() => {
 
     setSessionResults(prev => [...prev, { category: currentQ.category || '未分類', isCorrect }]);
 
+    // 直近50回答ログの保存
+    const newLogEntry = {
+      logId: Date.now().toString() + Math.random().toString(36).substr(2, 5),
+      timestamp: new Date().toISOString(),
+      displayId: currentQ.displayId || '',
+      customId: currentQ.customId || '',
+      category: currentQ.category || '未分類',
+      questionText: currentQ.questionText || '',
+      options: currentOptions || [],
+      userAnswer: type.includes('input') ? textInput : selectedOptions,
+      isCorrect: isCorrect,
+      isUnsure: false
+    };
+
+    setRecentLogs(prev => {
+      const updatedLogs = [newLogEntry, ...prev].slice(0, 50);
+      localStorage.setItem(`med-app-logs-${user.uid}-${currentAppId}`, JSON.stringify(updatedLogs));
+      return updatedLogs;
+    });
+
     if (user) {
       const prevHistory = userHistory[currentQ.id] || {};
       setPrevAttempt(prevHistory.timestamp ? prevHistory : null);
@@ -1055,6 +1090,18 @@ const courseCategoryTree = useMemo(() => {
     if (!user) return;
     const newUnsureStatus = !isUnsure;
     setIsUnsure(newUnsureStatus);
+
+    // 回答ログのisUnsure状態も更新
+    setRecentLogs(prev => {
+      if (prev.length === 0) return prev;
+      const updatedLogs = [...prev];
+      if (updatedLogs[0].displayId === currentQ.displayId) {
+        updatedLogs[0].isUnsure = newUnsureStatus;
+        localStorage.setItem(`med-app-logs-${user.uid}-${currentAppId}`, JSON.stringify(updatedLogs));
+      }
+      return updatedLogs;
+    });
+
     const updatedHistory = {
       ...userHistory[currentQ.id],
       isUnsure: newUnsureStatus
@@ -1260,6 +1307,88 @@ const courseCategoryTree = useMemo(() => {
     );
   }
 
+  // --- 回答ログ確認画面 ---
+  if (view === 'logs') {
+    return (
+      <div className="min-h-screen bg-gray-50 pb-20 print-container">
+        <style>{`
+          @media print {
+            .no-print { display: none !important; }
+            body { background: white; margin: 0; padding: 0; }
+            .print-card { 
+              page-break-inside: avoid; 
+              border: 1px solid #ddd; 
+              box-shadow: none !important; 
+              break-inside: avoid; 
+              margin-bottom: 12px;
+              background-color: white !important;
+            }
+          }
+        `}</style>
+        <header className="bg-white shadow-sm px-6 py-4 flex items-center justify-between sticky top-0 z-20 safe-area-top no-print">
+          <div className="flex items-center gap-4">
+            <button onClick={() => setView('dashboard')} className="p-2 -ml-2 text-gray-500 hover:bg-gray-100 rounded-full transition-colors">
+              <ArrowLeft size={24} />
+            </button>
+            <h1 className="text-xl font-bold text-gray-800">直近50回答ログ</h1>
+          </div>
+          <Button onClick={() => window.print()} variant="secondary" size="small" className="border-gray-300">
+            <Printer size={16} className="text-gray-600" /> PDF出力
+          </Button>
+        </header>
+        
+        <main className="p-4 max-w-3xl mx-auto space-y-4">
+          {recentLogs.length === 0 ? (
+            <div className="text-center py-20 text-gray-400 font-bold">
+              まだ回答履歴がありません
+            </div>
+          ) : (
+            recentLogs.map((log, i) => {
+              let statusLabel = log.isCorrect ? "正解" : "不正解";
+              let statusColor = log.isCorrect ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700";
+              if (log.isUnsure) {
+                statusLabel = "復習";
+                statusColor = "bg-amber-100 text-amber-700";
+              }
+
+              const displayUserAns = Array.isArray(log.userAnswer) ? log.userAnswer.join(', ') : log.userAnswer;
+              
+              return (
+                <div key={log.logId} className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 print-card space-y-3">
+                  <div className="flex justify-between items-start border-b border-gray-100 pb-3">
+                    <span className="text-sm font-bold text-gray-500">
+                      {log.category} (ID: {log.customId || log.displayId})
+                    </span>
+                    <span className={`text-xs font-bold px-2 py-1 rounded-md ${statusColor}`}>
+                      {statusLabel}
+                    </span>
+                  </div>
+                  
+                  <p className="text-gray-800 font-bold whitespace-pre-wrap text-sm leading-relaxed">
+                    {log.questionText}
+                  </p>
+                  
+                  {log.options && log.options.length > 0 && (
+                    <ul className="list-disc list-inside pl-2 text-xs text-gray-500 space-y-1 mt-2">
+                      {log.options.map((opt, idx) => <li key={idx}>{opt}</li>)}
+                    </ul>
+                  )}
+                  
+                  <div className="bg-gray-50 p-3 rounded-lg flex flex-col gap-1 mt-4 border border-gray-100">
+                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wide">あなたの回答</span>
+                    <span className={`text-sm font-bold ${log.isCorrect ? 'text-emerald-700' : 'text-red-600'}`}>
+                      {displayUserAns || '(未回答)'}
+                    </span>
+                  </div>
+                </div>
+              )
+            })
+          )}
+        </main>
+      </div>
+    );
+  }
+
   if (view === 'dashboard') {
     const validQuestionIds = new Set(allQuestions.map(q => q.id));
     const validHistory = Object.entries(userHistory)
@@ -1303,9 +1432,12 @@ const courseCategoryTree = useMemo(() => {
                 <p className="text-sm opacity-75 font-medium">要復習 (× / △)</p>
               </div>
             </div>
-            <div className="mt-6">
+            <div className="mt-6 flex flex-col gap-2">
               <Button onClick={() => setView('stats')} variant="outline" className="w-full border-white/30 text-white hover:bg-white/10 bg-white/10">
                 <BarChart2 size={18} /> 詳細な学習状況を確認
+              </Button>
+              <Button onClick={() => setView('logs')} variant="outline" className="w-full border-white/30 text-white hover:bg-white/10 bg-white/10">
+                <Printer size={18} /> 回答ログを確認・PDF出力
               </Button>
             </div>
           </div>
@@ -1443,7 +1575,6 @@ const courseCategoryTree = useMemo(() => {
             </div>
           )}
           
-          {/* 追加：描画負荷対策としてDOMの数を絞る (開発者用リスト) */}
           {user?.email === ADMIN_EMAIL && currentAppId !== 'custom-cross-course' && view === 'admin' && (
             <div className="bg-white rounded-3xl shadow-sm p-6 space-y-4">
               <h2 className="font-bold text-gray-800 flex items-center gap-2 border-b pb-4">
@@ -1918,7 +2049,6 @@ const courseCategoryTree = useMemo(() => {
     }
   }
 
-  // ランダム20問テストのときだけ、解答前はメタ情報を隠す
   const hideMeta = mode === 'random-20' && !showExplanation;
 
   return (
@@ -1941,7 +2071,6 @@ const courseCategoryTree = useMemo(() => {
           </div>
           <span className="text-lg">{currentQuestionIndex + 1} <span className="text-sm text-gray-400">/ {questions.length}</span></span>
           <div className="flex items-center gap-3 mt-1 text-xs text-gray-500 bg-blue-50 px-3 py-1 rounded-full border border-blue-100">
-            {/* 【修正④】成績も非表示にする */}
             {hideMeta ? (
                <span className="flex items-center gap-1">
                  <EyeOff size={12} className="text-gray-400"/> 成績非表示
